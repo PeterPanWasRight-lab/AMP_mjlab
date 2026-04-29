@@ -40,13 +40,18 @@
 
 ```bash
 conda activate mjlab
-cd wbc_mjlab
+cd AMP_mjlab
 python -m pip install -e .
 ```
 
-### 2. 应用 mjlab 补丁（必须）
+### 2. 应用 mjlab 补丁（可选）
 
-本仓库依赖对 mjlab 中 observation manager 的本地补丁（`history_ordering` 支持）。
+如果不打这个补丁，则需要在代码中去掉 `history_ordering` 配置。
+
+补丁作用说明：
+
+- 增加了历史观测的展开方式选项，可选择按时间维(`time`)或按观测项(`term`)展开。
+- mjlab 默认仅支持按 `term` 展开。
 
 补丁文件：
 

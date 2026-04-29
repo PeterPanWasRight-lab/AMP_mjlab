@@ -40,13 +40,18 @@ This reduces discontinuities caused by policy switching and yields more consiste
 
 ```bash
 conda activate mjlab
-cd wbc_mjlab
+cd AMP_mjlab
 python -m pip install -e .
 ```
 
-### 2. Apply mjlab Patch (Required)
+### 2. Apply mjlab Patch (Optional)
 
-This repo depends on a local patch to mjlab observation manager (`history_ordering` support).
+If you do not apply this patch, remove `history_ordering` configuration from the code.
+
+What this patch does:
+
+- It adds an option for how observation history is flattened: by time (`time`) or by term (`term`).
+- Default mjlab behavior supports only `term` ordering.
 
 Patch file:
 
