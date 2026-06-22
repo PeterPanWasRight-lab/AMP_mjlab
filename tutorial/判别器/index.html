@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>AMP 判别器原理可视化</title>
+<script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    color: #e6e6e6;
+    line-height: 1.7;
+    padding: 40px 20px;
+  }
+  .container { max-width: 1100px; margin: 0 auto; }
+  h1 {
+    font-size: 2.5em;
+    background: linear-gradient(90deg, #00d2ff, #3a47d5);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 10px;
+    text-align: center;
+  }
+  .subtitle {
+    text-align: center;
+    color: #888;
+    margin-bottom: 40px;
+    font-style: italic;
+  }
+  h2 {
+    font-size: 1.8em;
+    color: #00d2ff;
+    border-left: 4px solid #00d2ff;
+    padding-left: 15px;
+    margin: 50px 0 20px;
+  }
+  h3 {
+    font-size: 1.3em;
+    color: #ff6b9d;
+    margin: 25px 0 12px;
+  }
+  p, li { color: #d0d0d0; margin: 8px 0; }
+  code {
+    background: #0d1421;
+    color: #00ff88;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: "SF Mono", Monaco, monospace;
+    font-size: 0.9em;
+  }
+  pre {
+    background: #0d1421;
+    border: 1px solid #2a2a3e;
+    border-radius: 8px;
+    padding: 18px;
+    overflow-x: auto;
+    margin: 15px 0;
+  }
+  pre code { background: transparent; padding: 0; }
+  .box {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 25px;
+    margin: 20px 0;
+  }
+  .highlight { color: #ffeb3b; font-weight: 600; }
+  .danger { color: #ff5252; font-weight: 600; }
+  .good { color: #00ff88; font-weight: 600; }
+  svg { background: rgba(0,0,0,0.3); border-radius: 12px; margin: 20px 0; }
+  svg text { font-family: -apple-system, "PingFang SC", sans-serif; }
+  .axis { stroke: #888; stroke-width: 1.5; }
+  .label { fill: #e0e0e0; font-size: 13px; }
+  .title-text { fill: #00d2ff; font-size: 15px; font-weight: 600; }
+  .interactive-controls {
+    background: rgba(0,0,0,0.3);
+    padding: 15px;
+    border-radius: 8px;
+    margin: 15px 0;
+  }
+  .slider-row {
+    display: flex;
+    align-items: center;
+    margin: 10px 0;
+    gap: 15px;
+  }
+  .slider-row label { min-width: 150px; color: #00d2ff; font-weight: 600; }
+  input[type=range] {
+    flex: 1;
+    height: 6px;
+    background: #2a2a3e;
+    border-radius: 3px;
+    -webkit-appearance: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px; height: 18px;
+    background: #00d2ff;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+  .value-display { min-width: 60px; color: #ffeb3b; font-family: monospace; }
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 15px;
+    margin: 20px 0;
+  }
+  .comparison-card {
+    padding: 20px;
+    border-radius: 12px;
+    border: 2px solid;
+  }
+  .too-weak { border-color: #ffa726; background: rgba(255,167,38,0.1); }
+  .just-right { border-color: #00ff88; background: rgba(0,255,136,0.1); }
+  .too-strong { border-color: #ff5252; background: rgba(255,82,82,0.1); }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+  th, td { padding: 10px; text-align: left; }
+  tr { background: rgba(255,255,255,0.05); }
+  .btn {
+    padding: 10px 25px; background: #00d2ff; color: #000;
+    border: none; border-radius: 6px; cursor: pointer;
+    font-weight: 600; margin-top: 10px;
+  }
+  .btn:hover { background: #00ff88; }
+  .nav {
+    background: rgba(0,0,0,0.3); padding: 12px 20px;
+    border-radius: 8px; margin-bottom: 30px; text-align: center;
+  }
+  .nav a {
+    color: #00d2ff; margin: 0 12px; text-decoration: none; font-size: 0.95em;
+  }
+  .nav a:hover { color: #00ff88; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="nav">
+  <a href="#section1">1. 判别器是什么</a>
+  <a href="#section2">2. 训练损失</a>
+  <a href="#section3">3. 风格奖励</a>
+  <a href="#section4">4. 准确率影响</a>
+  <a href="#section5">5. 对抗平衡</a>
+  <a href="#section6">6. 数据流</a>
+  <a href="#section7">7. 数学公式</a>
+  <a href="#section8">8. 概念澄清</a>
+  <a href="#section9">9. 总结</a>
+</div>
+
+<h1>⚖️ AMP 判别器原理可视化</h1>
+<p class="subtitle">Adversarial Motion Priors: Discriminator Math & Dynamics</p>
+
+<!-- 第 1 节 -->
+<h2 id="section1">1. 判别器 D 是个什么？</h2>
+
+<div class="box">
+<p>判别器 D 就是一个<strong>打分函数</strong>，结构是 MLP（多层感知器）：</p>
+
+<svg width="100%" height="260" viewBox="0 0 1000 260">
+  <rect x="20" y="90" width="120" height="80" rx="6" fill="#0d1421" stroke="#00d2ff" stroke-width="2"/>
+  <text x="80" y="115" class="label" text-anchor="middle">身体状态</text>
+  <text x="80" y="135" class="label" text-anchor="middle">(s, s')</text>
+  <text x="80" y="155" class="label" text-anchor="middle">390 维</text>
+
+  <text x="160" y="130" class="label" font-size="20">→</text>
+
+  <rect x="200" y="70" width="120" height="120" rx="6" fill="#0d1421" stroke="#3a47d5" stroke-width="2"/>
+  <text x="260" y="120" class="label" text-anchor="middle">Linear</text>
+  <text x="260" y="140" class="label" text-anchor="middle">390 → 1024</text>
+  <text x="260" y="160" class="label" text-anchor="middle">+ ReLU</text>
+
+  <text x="340" y="130" class="label" font-size="20">→</text>
+
+  <rect x="380" y="90" width="120" height="80" rx="6" fill="#0d1421" stroke="#3a47d5" stroke-width="2"/>
+  <text x="440" y="125" class="label" text-anchor="middle">Linear</text>
+  <text x="440" y="145" class="label" text-anchor="middle">1024 → 1</text>
+
+  <text x="520" y="130" class="label" font-size="20">→</text>
+
+  <rect x="560" y="90" width="160" height="80" rx="6" fill="#0d1421" stroke="#ffeb3b" stroke-width="2"/>
+  <text x="640" y="120" class="title-text" text-anchor="middle">分数 d</text>
+  <text x="640" y="145" class="label" text-anchor="middle">∈ [-1, +1]</text>
+  <text x="640" y="165" class="label" text-anchor="middle">像不像人</text>
+
+  <text x="640" y="210" fill="#00ff88" text-anchor="middle" font-size="14">+1 = 专家</text>
+  <text x="640" y="230" fill="#ff5252" text-anchor="middle" font-size="14">-1 = 不是人</text>
+</svg>
+
+<p><strong>输入</strong>：一帧到下一帧的身体状态（13 个 body 的位置+姿态+速度，195 维 × 2 拼起来）</p>
+<p><strong>输出</strong>：一个标量 <code>d</code>，表示"像不像人"</p>
+<p><strong>核心</strong>：不看"姿势像不像"，看"<span class="highlight">动作的过渡</span>像不像"——所以要 (s, s') 两个时刻</p>
+</div>
+
+<!-- 第 2 节 -->
+<h2 id="section2">2. 判别器怎么训练？</h2>
+
+<div class="box">
+<p>LSGAN 损失（最小二乘 GAN）—— 让 D 给专家 +1 分，给 G1 -1 分：</p>
+
+<pre><code>expert_loss = MSE(D(专家的 (s,s')),  +1)   # 让 D 给专家高分
+policy_loss = MSE(D(G1 的 (s,s')),   -1)   # 让 D 给 G1 低分
+grad_pen    = λ · (||∇D||_2)²              # 让 D 学得"软"
+d_loss      = 0.5 · (expert_loss + policy_loss) + grad_pen</code></pre>
+
+<p>把符号翻译成人话：</p>
+<ul>
+<li><code>expert_loss</code> = (D 对专家打的分 - 1)² —— D 看不到位的差距</li>
+<li><code>policy_loss</code> = (D 对 G1 打的分 + 1)² —— D 看不到位的差距</li>
+<li><code>grad_pen</code> = D 在输入附近的"陡峭程度"——惩罚 D 太尖锐</li>
+</ul>
+
+<p><span class="highlight">训练目的</span>：让 D 看完数据后，对专家接近 +1，对 G1 接近 -1。</p>
+</div>
+
+<!-- 第 3 节 -->
+<h2 id="section3">3. 风格奖励：style_reward = f(d)</h2>
+
+<div class="box">
+<p>训练好的 D 给 G1 打分 d 后，style_reward 这么算：</p>
+<pre><code>style_reward = clip(1 - 0.25 · (d - 1)²,  min=0)</code></pre>
+
+<p>这是个<span class="highlight">离 +1 越远奖励越低</span>的平方函数。下图展示 D 在不同准确率时，G1 看到的奖励曲线：</p>
+
+<div class="interactive-controls">
+  <div class="slider-row">
+    <label>D 的准确率：</label>
+    <input type="range" id="dAccSlider" min="0" max="100" value="80">
+    <span class="value-display" id="dAccVal">80%</span>
+  </div>
+  <p style="color:#888; font-size:0.9em;">调节 D 的准确率，观察 G1 收到的 style_reward 变化</p>
+</div>
+
+<svg id="reward-svg" width="100%" height="400" viewBox="0 0 800 400"></svg>
+</div>
+
+<!-- 第 4 节 -->
+<h2 id="section4">4. D 的准确率对训练的影响</h2>
+
+<div class="box">
+<p>把 D 想象成"打分老师"，三种水平对比：</p>
+
+<div class="comparison-grid">
+  <div class="comparison-card too-weak">
+    <h3 style="color:#ffa726">😵 D 太差（50%）</h3>
+    <p>D 是"瞎子老师"——分不清人和 G1</p>
+    <p>G1 收到的 d ≈ 0.3</p>
+    <p>style_reward ≈ 0.85（虚高）</p>
+    <p><span class="danger">问题</span>：G1 觉得"做得很好"，实际很差，没有改进方向</p>
+  </div>
+
+  <div class="comparison-card just-right">
+    <h3 style="color:#00ff88">✅ D 刚刚好（70-80%）</h3>
+    <p>D 是"普通老师"——大致能分辨</p>
+    <p>G1 收到的 d ≈ 0.0</p>
+    <p>style_reward ≈ 0.75（中等）</p>
+    <p><span class="good">效果</span>：G1 改进一点，d 提升一点，奖励稳步上升</p>
+  </div>
+
+  <div class="comparison-card too-strong">
+    <h3 style="color:#ff5252">😈 D 太强（95%+）</h3>
+    <p>D 是"完美老师"——一眼辨真假</p>
+    <p>G1 收到的 d ≈ -0.95</p>
+    <p>style_reward ≈ 0.05（极低）</p>
+    <p><span class="danger">问题</span>：G1 收不到梯度，不知道往哪走</p>
+  </div>
+</div>
+</div>
+
+<!-- 第 5 节 -->
+<h2 id="section5">5. 对抗平衡：G 和 D 的对抗</h2>
+
+<div class="box">
+<p>下面是一个<span class="highlight">交互式模拟</span>：G1 在进步，D 必须跟，否则 G1 会"骗"过 D。</p>
+
+<div class="interactive-controls">
+  <div class="slider-row">
+    <label>G1 的能力：</label>
+    <input type="range" id="gSlider" min="0" max="100" value="30">
+    <span class="value-display" id="gVal">30%</span>
+  </div>
+  <div class="slider-row">
+    <label>D 的能力：</label>
+    <input type="range" id="dSlider" min="0" max="100" value="50">
+    <span class="value-display" id="dVal">50%</span>
+  </div>
+  <button class="btn" id="trainBtn">训练 50 步</button>
+  <button class="btn" id="resetBtn" style="background:#3a47d5; color:#fff; margin-left:10px;">重置</button>
+</div>
+
+<svg id="adversarial-svg" width="100%" height="450" viewBox="0 0 900 450"></svg>
+</div>
+
+<!-- 第 6 节 -->
+<h2 id="section6">6. AMP 完整数据流</h2>
+
+<div class="box">
+<svg width="100%" height="500" viewBox="0 0 1000 500">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <polygon points="0 0, 9 3, 0 6" fill="#888"/>
+    </marker>
+    <marker id="arrow-yellow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <polygon points="0 0, 9 3, 0 6" fill="#ffeb3b"/>
+    </marker>
+  </defs>
+
+  <rect x="50" y="50" width="160" height="60" rx="8" fill="#0d1421" stroke="#00ff88" stroke-width="2"/>
+  <text x="130" y="80" class="label" text-anchor="middle" fill="#00ff88" font-weight="600">专家 npz</text>
+  <text x="130" y="100" class="label" text-anchor="middle" font-size="11">LAFAN1 数据</text>
+
+  <rect x="290" y="50" width="140" height="60" rx="8" fill="#0d1421" stroke="#00d2ff" stroke-width="2"/>
+  <text x="360" y="80" class="label" text-anchor="middle" fill="#00d2ff" font-weight="600">AMPLoader</text>
+  <text x="360" y="100" class="label" text-anchor="middle" font-size="11">提供 expert (s,s')</text>
+
+  <rect x="530" y="50" width="140" height="60" rx="8" fill="#0d1421" stroke="#ffeb3b" stroke-width="2"/>
+  <text x="600" y="80" class="label" text-anchor="middle" fill="#ffeb3b" font-weight="600">判别器 D</text>
+  <text x="600" y="100" class="label" text-anchor="middle" font-size="11">评分 [-1, +1]</text>
+
+  <line x1="210" y1="80" x2="285" y2="80" stroke="#888" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="430" y1="80" x2="525" y2="80" stroke="#888" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="50" y="220" width="160" height="60" rx="8" fill="#0d1421" stroke="#ff6b9d" stroke-width="2"/>
+  <text x="130" y="250" class="label" text-anchor="middle" fill="#ff6b9d" font-weight="600">策略 π(a|s)</text>
+  <text x="130" y="270" class="label" text-anchor="middle" font-size="11">ActorCritic</text>
+
+  <rect x="290" y="220" width="140" height="60" rx="8" fill="#0d1421" stroke="#ff6b9d" stroke-width="2"/>
+  <text x="360" y="250" class="label" text-anchor="middle" fill="#ff6b9d" font-weight="600">环境 step</text>
+  <text x="360" y="270" class="label" text-anchor="middle" font-size="11">G1 物理仿真</text>
+
+  <rect x="530" y="220" width="140" height="60" rx="8" fill="#0d1421" stroke="#3a47d5" stroke-width="2"/>
+  <text x="600" y="250" class="label" text-anchor="middle" fill="#3a47d5" font-weight="600">amp_storage</text>
+  <text x="600" y="270" class="label" text-anchor="middle" font-size="11">最近 100k 步</text>
+
+  <line x1="210" y1="250" x2="285" y2="250" stroke="#888" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="430" y1="250" x2="525" y2="250" stroke="#888" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <line x1="670" y1="240" x2="670" y2="115" stroke="#888" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="685" y="180" class="label" fill="#888" font-size="11">policy (s,s')</text>
+
+  <path d="M 600,110 L 600,160 L 750,160 L 750,360" stroke="#ffeb3b" stroke-width="1.5" fill="none" marker-end="url(#arrow-yellow)"/>
+  <text x="780" y="180" class="label" fill="#ffeb3b">style_reward</text>
+
+  <rect x="600" y="360" width="140" height="60" rx="8" fill="#0d1421" stroke="#ff5252" stroke-width="2"/>
+  <text x="670" y="390" class="label" text-anchor="middle" fill="#ff5252" font-weight="600">总 reward</text>
+  <text x="670" y="410" class="label" text-anchor="middle" font-size="11">task + style</text>
+
+  <path d="M 600,390 L 130,390 L 130,280" stroke="#888" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="350" y="410" class="label" fill="#888" font-size="11">PPO 更新</text>
+</svg>
+</div>
+
+<!-- 第 7 节 -->
+<h2 id="section7">7. 核心数学公式</h2>
+
+<div class="box">
+<h3>7.1 LSGAN 损失</h3>
+<p>$$\mathcal{L}_D^{\text{expert}} = \frac{1}{2}\mathbb{E}_{(s_e, s_e') \sim \mathcal{B}_e}\left[\left(D(s_e, s_e') - 1\right)^2\right]$$</p>
+<p>$$\mathcal{L}_D^{\text{policy}} = \frac{1}{2}\mathbb{E}_{(s_\pi, s_\pi') \sim \mathcal{B}_\pi}\left[\left(D(s_\pi, s_\pi') + 1\right)^2\right]$$</p>
+<p>$$\mathcal{L}_D = \mathcal{L}_D^{\text{expert}} + \mathcal{L}_D^{\text{policy}} + \lambda \cdot \mathbb{E}_{x \sim \mathcal{B}_e}\left[\|\nabla_x D(x)\|_2^2\right]$$</p>
+
+<h3>7.2 风格奖励（推理时）</h3>
+<p>$$r_{\text{style}}(s, s') = w \cdot \max\left(0,\ 1 - \frac{1}{4}\big(D(s, s') - 1\big)^2\right)$$</p>
+<p>其中 \(w = \text{amp\_reward\_coef}\)，\(\max(0, \cdot)\) 是 clip(min=0)。</p>
+
+<h3>7.3 奖励曲线推导</h3>
+<p>令 \(x = d - 1\)，则 \(x^2\) 是离 0 越远越大的平方函数。\(1 - 0.25 x^2\) 就是离 +1 越远越小的函数。</p>
+<p>导数（梯度信号）：\(\frac{d}{dd} r_{\text{style}} = -0.5 (d - 1)\)</p>
+<p>当 \(d = 0\) 时梯度 = 0.5（最大），当 \(d = -0.95\) 时梯度 = 0.025（很小）—— 这就是 D 太强时训练失败的原因。</p>
+</div>
+
+<!-- 第 8 节 -->
+<h2 id="section8">8. 易混概念澄清</h2>
+
+<div class="box">
+<h3>8.1 D 太强 vs D 过拟合</h3>
+<table>
+<tr>
+  <th style="text-align:left">概念</th>
+  <th style="text-align:left">描述的维度</th>
+  <th style="text-align:left">问的问题</th>
+</tr>
+<tr>
+  <td style="color:#00d2ff">D 太强</td>
+  <td>D 当前的判别能力</td>
+  <td>"D 能不能完美区分专家和 G1"</td>
+</tr>
+<tr>
+  <td style="color:#ff6b9d">D 过拟合</td>
+  <td>D 在训练集 vs 测试集上的差异</td>
+  <td>"D 是不是只记住了见过的样本"</td>
+</tr>
+</table>
+<p>两者症状相似（都崩训练），但根因不同：</p>
+<ul>
+<li><strong>D 太强</strong>：在所有数据上都好（包括 G1 没见过的）→ 评分太极端，梯度消失</li>
+<li><strong>D 过拟合</strong>：在训练集上好，新数据上差 → G 被训练集分布骗</li>
+</ul>
+<p>在 AMP/GAN 里更准确的术语是 <span class="highlight">"discriminator dominance"（判别器支配）</span>。</p>
+</div>
+
+<div class="box">
+<h3>8.2 共性 vs 非共性的数学解释</h3>
+<p>判别器 D 学习的判别面在"风格方向"上很宽（步速 0.5~3.0 m/s 都在专家侧），但在"反风格方向"上很严。</p>
+<p>原因：</p>
+<ol>
+<li><strong>梯度惩罚 grad_pen</strong> 让 D 在专家流形附近平滑（沿流形方向 D 不变）</li>
+<li><strong>多样数据</strong> 让 D 找不到"在所有专家中都成立"的非共性特征</li>
+<li><strong>LSGAN 损失</strong> 强制 D 找最强分类特征 → 只有共性满足要求</li>
+</ol>
+</div>
+
+<!-- 第 9 节 -->
+<h2 id="section9">9. 核心要点总结</h2>
+
+<div class="box">
+<ul style="list-style: none; padding: 0;">
+<li style="padding: 12px; border-left: 3px solid #00d2ff; margin: 8px 0; background: rgba(0,210,255,0.05);">
+<span class="highlight">AMP = PPO + 风格奖励</span>。判别器只算"像不像人"的分数，这个分数加到 env reward 上，PPO 该怎么训就怎么训。
+</li>
+<li style="padding: 12px; border-left: 3px solid #00ff88; margin: 8px 0; background: rgba(0,255,136,0.05);">
+<span class="highlight">D 是 70-80% 准确率</span>是"G1 能感受到改进信号"的最佳状态。grad_pen 让 D 自然不会冲到 100%。
+</li>
+<li style="padding: 12px; border-left: 3px solid #ffeb3b; margin: 8px 0; background: rgba(255,235,59,0.05);">
+<span class="highlight">多样性数据</span>让 D 只能学到"风格共性"，剥离步速/方向/个体差异等"非共性噪声"。
+</li>
+<li style="padding: 12px; border-left: 3px solid #ff5252; margin: 8px 0; background: rgba(255,82,82,0.05);">
+<span class="highlight">没法设计完美奖励</span>——因为"什么是像人"本身就没法用人手定义。D 存在就是为了让神经网络自己发现这个标准。
+</li>
+<li style="padding: 12px; border-left: 3px solid #ff6b9d; margin: 8px 0; background: rgba(255,107,157,0.05);">
+<span class="highlight">D 强 ≠ D 过拟合</span>。前者是判别能力太强，后者是泛化能力差。两者症状相似但根因不同。
+</li>
+</ul>
+</div>
+
+<p style="text-align:center; color:#888; margin-top:50px;">
+—— AMP 判别器原理可视化 · 配合 <code>AMP_motion_playback.md</code> 阅读 ——
+</p>
+
+</div>
+
+<script>
+// ===== 1. style_reward 交互式曲线 =====
+function drawRewardPlot() {
+  const svg = document.getElementById('reward-svg');
+  const dAcc = parseFloat(document.getElementById('dAccSlider').value) / 100;
+  document.getElementById('dAccVal').textContent = Math.round(dAcc * 100) + '%';
+
+  const W = 800, H = 400;
+  const padX = 70, padY = 60;
+  const plotW = W - padX - 20;
+  const plotH = H - 2 * padY;
+
+  // dPolicy 期望: 准确率越高, dPolicy 越接近 -1
+  const dPolicy = 0.3 - 1.25 * dAcc;
+
+  svg.innerHTML = '';
+
+  const title = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  title.setAttribute('x', W/2); title.setAttribute('y', 25);
+  title.setAttribute('class', 'title-text');
+  title.setAttribute('text-anchor', 'middle');
+  title.textContent = `D 准确率: ${Math.round(dAcc*100)}%  →  G1 收到 d ≈ ${dPolicy.toFixed(2)}`;
+  svg.appendChild(title);
+
+  const xAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  xAxis.setAttribute('x1', padX); xAxis.setAttribute('y1', H - padY);
+  xAxis.setAttribute('x2', W - 20); xAxis.setAttribute('y2', H - padY);
+  xAxis.setAttribute('class', 'axis');
+  svg.appendChild(xAxis);
+
+  const yAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  yAxis.setAttribute('x1', padX); yAxis.setAttribute('y1', 50);
+  yAxis.setAttribute('x2', padX); yAxis.setAttribute('y2', H - padY);
+  yAxis.setAttribute('class', 'axis');
+  svg.appendChild(yAxis);
+
+  const xLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  xLabel.setAttribute('x', W/2); xLabel.setAttribute('y', H - 10);
+  xLabel.setAttribute('class', 'label'); xLabel.setAttribute('text-anchor', 'middle');
+  xLabel.textContent = "D 的输出 d";
+  svg.appendChild(xLabel);
+
+  const yLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  yLabel.setAttribute('x', 20); yLabel.setAttribute('y', H/2);
+  yLabel.setAttribute('class', 'label'); yLabel.setAttribute('text-anchor', 'middle');
+  yLabel.setAttribute('transform', `rotate(-90 20 ${H/2})`);
+  yLabel.textContent = "style_reward";
+  svg.appendChild(yLabel);
+
+  for (let d = -1; d <= 1.001; d += 0.5) {
+    const x = padX + (d + 1) / 2 * plotW;
+    const tick = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    tick.setAttribute('x1', x); tick.setAttribute('y1', H - padY);
+    tick.setAttribute('x2', x); tick.setAttribute('y2', H - padY + 5);
+    tick.setAttribute('class', 'axis');
+    svg.appendChild(tick);
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', x); label.setAttribute('y', H - padY + 20);
+    label.setAttribute('class', 'label'); label.setAttribute('text-anchor', 'middle');
+    label.textContent = d.toFixed(1);
+    svg.appendChild(label);
+  }
+
+  for (let r = 0; r <= 1.001; r += 0.25) {
+    const y = H - padY - r * plotH;
+    const tick = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    tick.setAttribute('x1', padX - 5); tick.setAttribute('y1', y);
+    tick.setAttribute('x2', padX); tick.setAttribute('y2', y);
+    tick.setAttribute('class', 'axis');
+    svg.appendChild(tick);
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', padX - 10); label.setAttribute('y', y + 4);
+    label.setAttribute('class', 'label'); label.setAttribute('text-anchor', 'end');
+    label.textContent = r.toFixed(2);
+    svg.appendChild(label);
+  }
+
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  let d = '';
+  for (let dd = -1; dd <= 1.001; dd += 0.05) {
+    const r = Math.max(0, 1 - 0.25 * (dd - 1) ** 2);
+    const x = padX + (dd + 1) / 2 * plotW;
+    const y = H - padY - r * plotH;
+    d += (d === '' ? 'M' : 'L') + x + ',' + y + ' ';
+  }
+  path.setAttribute('d', d);
+  path.setAttribute('stroke', '#ffeb3b'); path.setAttribute('stroke-width', '2.5');
+  path.setAttribute('fill', 'none');
+  svg.appendChild(path);
+
+  const xMark = padX + (dPolicy + 1) / 2 * plotW;
+  const rMark = Math.max(0, 1 - 0.25 * (dPolicy - 1) ** 2);
+  const yMark = H - padY - rMark * plotH;
+
+  const vline = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  vline.setAttribute('x1', xMark); vline.setAttribute('y1', H - padY);
+  vline.setAttribute('x2', xMark); vline.setAttribute('y2', yMark);
+  vline.setAttribute('stroke', '#ff6b9d'); vline.setAttribute('stroke-width', '1.5');
+  vline.setAttribute('stroke-dasharray', '4,4');
+  svg.appendChild(vline);
+
+  const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  dot.setAttribute('cx', xMark); dot.setAttribute('cy', yMark);
+  dot.setAttribute('r', 8); dot.setAttribute('fill', '#ff6b9d');
+  svg.appendChild(dot);
+
+  const lbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  lbl.setAttribute('x', xMark + 15); lbl.setAttribute('y', yMark - 10);
+  lbl.setAttribute('fill', '#ff6b9d');
+  lbl.setAttribute('font-size', '13');
+  lbl.setAttribute('font-weight', '600');
+  lbl.textContent = `reward = ${rMark.toFixed(2)}`;
+  svg.appendChild(lbl);
+
+  const hint = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  hint.setAttribute('x', W/2); hint.setAttribute('y', 45);
+  hint.setAttribute('text-anchor', 'middle');
+  hint.setAttribute('font-size', '12');
+  if (dAcc < 0.6) {
+    hint.textContent = "D 太差 → G1 收到虚高奖励，误以为做得好";
+    hint.setAttribute('fill', '#ffa726');
+  } else if (dAcc < 0.9) {
+    hint.textContent = "D 刚刚好 → G1 感受到改进方向，能稳步学习";
+    hint.setAttribute('fill', '#00ff88');
+  } else {
+    hint.textContent = "D 太强 → G1 收到几乎为 0 的奖励，梯度消失";
+    hint.setAttribute('fill', '#ff5252');
+  }
+  svg.appendChild(hint);
+}
+
+// ===== 2. 对抗平衡模拟 =====
+let gAbility = 0.3, dAbility = 0.5;
+let history = [];
+let stepCount = 0;
+
+function drawAdversarialPlot() {
+  const svg = document.getElementById('adversarial-svg');
+  const W = 900, H = 450;
+  const padX = 70, padY = 50;
+  const plotW = W - padX - 30;
+  const plotH = H - 2 * padY - 50;
+
+  svg.innerHTML = '';
+
+  const title = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  title.setAttribute('x', W/2); title.setAttribute('y', 25);
+  title.setAttribute('class', 'title-text');
+  title.setAttribute('text-anchor', 'middle');
+  title.textContent = `G: ${(gAbility*100).toFixed(0)}%   D: ${(dAbility*100).toFixed(0)}%   step: ${stepCount}`;
+  svg.appendChild(title);
+
+  const dPolicyRaw = (gAbility - dAbility) * 1.8;
+  const dPolicy = Math.max(-1, Math.min(1, dPolicyRaw));
+  const reward = Math.max(0, 1 - 0.25 * (dPolicy - 1) ** 2);
+
+  const status = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  status.setAttribute('x', W/2); status.setAttribute('y', 45);
+  status.setAttribute('text-anchor', 'middle');
+  status.setAttribute('font-size', '13');
+  if (reward > 0.7) {
+    status.setAttribute('fill', '#ffa726');
+    status.textContent = `d ≈ ${dPolicy.toFixed(2)}  →  reward ≈ ${reward.toFixed(2)}  (D 太弱?)`;
+  } else if (reward > 0.3) {
+    status.setAttribute('fill', '#00ff88');
+    status.textContent = `d ≈ ${dPolicy.toFixed(2)}  →  reward ≈ ${reward.toFixed(2)}  ✓ 健康`;
+  } else {
+    status.setAttribute('fill', '#ff5252');
+    status.textContent = `d ≈ ${dPolicy.toFixed(2)}  →  reward ≈ ${reward.toFixed(2)}  (D 太强?)`;
+  }
+  svg.appendChild(status);
+
+  const xAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  xAxis.setAttribute('x1', padX); xAxis.setAttribute('y1', H - padY);
+  xAxis.setAttribute('x2', W - 20); xAxis.setAttribute('y2', H - padY);
+  xAxis.setAttribute('class', 'axis');
+  svg.appendChild(xAxis);
+
+  const yAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  yAxis.setAttribute('x1', padX); yAxis.setAttribute('y1', 60);
+  yAxis.setAttribute('x2', padX); yAxis.setAttribute('y2', H - padY);
+  yAxis.setAttribute('class', 'axis');
+  svg.appendChild(yAxis);
+
+  const xLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  xLabel.setAttribute('x', W/2); xLabel.setAttribute('y', H - 5);
+  xLabel.setAttribute('class', 'label'); xLabel.setAttribute('text-anchor', 'middle');
+  xLabel.textContent = "训练步数";
+  svg.appendChild(xLabel);
+
+  const yLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  yLabel.setAttribute('x', 20); yLabel.setAttribute('y', H/2);
+  yLabel.setAttribute('class', 'label'); yLabel.setAttribute('text-anchor', 'middle');
+  yLabel.setAttribute('transform', `rotate(-90 20 ${H/2})`);
+  yLabel.textContent = "能力 / 评分";
+  svg.appendChild(yLabel);
+
+  if (history.length > 1) {
+    let path = '';
+    history.forEach((pt, i) => {
+      const x = padX + (i / (history.length - 1)) * plotW;
+      const y = H - padY - pt.g * plotH;
+      path += (i === 0 ? 'M' : 'L') + x + ',' + y + ' ';
+    });
+    const gPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    gPath.setAttribute('d', path);
+    gPath.setAttribute('stroke', '#ff6b9d'); gPath.setAttribute('stroke-width', '2.5');
+    gPath.setAttribute('fill', 'none');
+    svg.appendChild(gPath);
+
+    path = '';
+    history.forEach((pt, i) => {
+      const x = padX + (i / (history.length - 1)) * plotW;
+      const y = H - padY - pt.d * plotH;
+      path += (i === 0 ? 'M' : 'L') + x + ',' + y + ' ';
+    });
+    const dPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    dPath.setAttribute('d', path);
+    dPath.setAttribute('stroke', '#00d2ff'); dPath.setAttribute('stroke-width', '2.5');
+    dPath.setAttribute('fill', 'none');
+    svg.appendChild(dPath);
+
+    path = '';
+    history.forEach((pt, i) => {
+      const x = padX + (i / (history.length - 1)) * plotW;
+      const y = H - padY - ((pt.dPolicy + 1) / 2) * plotH;
+      path += (i === 0 ? 'M' : 'L') + x + ',' + y + ' ';
+    });
+    const dpPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    dpPath.setAttribute('d', path);
+    dpPath.setAttribute('stroke', '#ffeb3b'); dpPath.setAttribute('stroke-width', '1.5');
+    dpPath.setAttribute('fill', 'none');
+    dpPath.setAttribute('stroke-dasharray', '4,4');
+    svg.appendChild(dpPath);
+  }
+
+  // Legend
+  const legend = [
+    { color: '#ff6b9d', text: 'G 能力' },
+    { color: '#00d2ff', text: 'D 能力' },
+    { color: '#ffeb3b', text: 'D 评分' },
+  ];
+  legend.forEach((l, i) => {
+    const y = 80 + i * 20;
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', W - 130); line.setAttribute('y1', y);
+    line.setAttribute('x2', W - 110); line.setAttribute('y2', y);
+    line.setAttribute('stroke', l.color); line.setAttribute('stroke-width', '2.5');
+    if (l.color === '#ffeb3b') line.setAttribute('stroke-dasharray', '4,4');
+    svg.appendChild(line);
+    const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    txt.setAttribute('x', W - 105); txt.setAttribute('y', y + 4);
+    txt.setAttribute('fill', l.color); txt.setAttribute('font-size', '12');
+    txt.textContent = l.text;
+    svg.appendChild(txt);
+  });
+}
+
+function recordHistory() {
+  const dPolicy = Math.max(-1, Math.min(1, (gAbility - dAbility) * 1.8));
+  history.push({
+    g: gAbility,
+    d: dAbility,
+    dPolicy: dPolicy
+  });
+  if (history.length > 100) history.shift();
+}
+
+function trainSteps(n) {
+  for (let i = 0; i < n; i++) {
+    const dPolicy = Math.max(-1, Math.min(1, (gAbility - dAbility) * 1.8));
+    const reward = Math.max(0, 1 - 0.25 * (dPolicy - 1) ** 2);
+
+    // G 进步速度: 正比于 reward
+    const gProgress = reward * 0.04;
+    // D 进步速度: 跟随 G, 受 grad_pen 约束
+    const dProgress = (gProgress + 0.025) * 0.6;
+
+    gAbility = Math.min(1, gAbility + gProgress);
+    dAbility = Math.min(1, dAbility + dProgress);
+
+    stepCount++;
+    recordHistory();
+  }
+  drawAdversarialPlot();
+}
+
+// 初始化
+document.addEventListener('DOMContentLoaded', function() {
+  recordHistory();
+  recordHistory();
+  drawRewardPlot();
+  drawAdversarialPlot();
+
+  document.getElementById('dAccSlider').addEventListener('input', drawRewardPlot);
+  document.getElementById('gSlider').addEventListener('input', e => {
+    gAbility = parseFloat(e.target.value) / 100;
+    document.getElementById('gVal').textContent = e.target.value + '%';
+    drawAdversarialPlot();
+  });
+  document.getElementById('dSlider').addEventListener('input', e => {
+    dAbility = parseFloat(e.target.value) / 100;
+    document.getElementById('dVal').textContent = e.target.value + '%';
+    drawAdversarialPlot();
+  });
+  document.getElementById('trainBtn').addEventListener('click', () => trainSteps(50));
+  document.getElementById('resetBtn').addEventListener('click', () => {
+    gAbility = parseFloat(document.getElementById('gSlider').value) / 100;
+    dAbility = parseFloat(document.getElementById('dSlider').value) / 100;
+    history = [];
+    stepCount = 0;
+    recordHistory();
+    recordHistory();
+    drawAdversarialPlot();
+  });
+});
+</script>
+
+</body>
+</html>

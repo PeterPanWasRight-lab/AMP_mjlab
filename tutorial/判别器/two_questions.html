@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>两个核心问题解答</title>
+<script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    color: #e6e6e6;
+    line-height: 1.7;
+    padding: 40px 20px;
+  }
+  .container { max-width: 1100px; margin: 0 auto; }
+  h1 {
+    font-size: 2.4em;
+    background: linear-gradient(90deg, #ff6b9d, #00d2ff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 10px;
+    text-align: center;
+  }
+  .subtitle { text-align: center; color: #888; margin-bottom: 40px; font-style: italic; }
+  h2 {
+    font-size: 1.7em; color: #00d2ff;
+    border-left: 4px solid #00d2ff; padding-left: 15px;
+    margin: 50px 0 20px;
+  }
+  h3 { font-size: 1.2em; color: #ff6b9d; margin: 20px 0 10px; }
+  p, li { color: #d0d0d0; margin: 8px 0; }
+  code {
+    background: #0d1421; color: #00ff88; padding: 2px 6px;
+    border-radius: 4px; font-family: "SF Mono", Monaco, monospace; font-size: 0.9em;
+  }
+  pre {
+    background: #0d1421; border: 1px solid #2a2a3e; border-radius: 8px;
+    padding: 18px; overflow-x: auto; margin: 15px 0;
+  }
+  pre code { background: transparent; padding: 0; }
+  .box {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px; padding: 25px; margin: 20px 0;
+  }
+  .highlight { color: #ffeb3b; font-weight: 600; }
+  .danger { color: #ff5252; font-weight: 600; }
+  .good { color: #00ff88; font-weight: 600; }
+  svg { background: rgba(0,0,0,0.3); border-radius: 12px; margin: 20px 0; }
+  svg text { font-family: -apple-system, "PingFang SC", sans-serif; }
+  .axis { stroke: #888; stroke-width: 1.5; }
+  .grid { stroke: rgba(255,255,255,0.1); stroke-width: 0.5; }
+  .label { fill: #e0e0e0; font-size: 13px; }
+  .title-text { fill: #00d2ff; font-size: 15px; font-weight: 600; }
+  .interactive-controls {
+    background: rgba(0,0,0,0.3); padding: 15px; border-radius: 8px; margin: 15px 0;
+  }
+  .slider-row {
+    display: flex; align-items: center; margin: 10px 0; gap: 15px;
+  }
+  .slider-row label { min-width: 200px; color: #00d2ff; font-weight: 600; }
+  input[type=range] {
+    flex: 1; height: 6px; background: #2a2a3e; border-radius: 3px; -webkit-appearance: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 18px; height: 18px;
+    background: #00d2ff; border-radius: 50%; cursor: pointer;
+  }
+  .value-display { min-width: 80px; color: #ffeb3b; font-family: monospace; }
+  .step-box {
+    background: rgba(0,0,0,0.2);
+    border-left: 3px solid #00d2ff; padding: 12px 18px; margin: 10px 0;
+    border-radius: 0 8px 8px 0;
+  }
+  .step-num {
+    display: inline-block; background: #00d2ff; color: #000;
+    width: 24px; height: 24px; border-radius: 50%;
+    text-align: center; line-height: 24px; font-weight: 700; margin-right: 10px;
+  }
+  .nav {
+    background: rgba(0,0,0,0.3); padding: 12px 20px;
+    border-radius: 8px; margin-bottom: 30px; text-align: center;
+  }
+  .nav a { color: #00d2ff; margin: 0 12px; text-decoration: none; font-size: 0.95em; }
+  .nav a:hover { color: #00ff88; }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+  th, td { padding: 10px; text-align: left; }
+  tr { background: rgba(255,255,255,0.05); }
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="nav">
+  <a href="#q1">问题 1: D 太强为何崩</a>
+  <a href="#q2">问题 2: 不用更好奖励?</a>
+  <a href="#compare">两题关系</a>
+  <a href="#summary">总结</a>
+</div>
+
+<h1>🎯 两个核心问题解答</h1>
+<p class="subtitle">D 太强的根因 & 为什么不让奖励自带梯度</p>
+
+<!-- ============ 问题 1 ============ -->
+<h2 id="q1">问题 1: D 太强的表现 —— 奖励几乎为 0</h2>
+
+<div class="box">
+<h3>1.1 表面原因：clip(min=0) 把奖励压到 0</h3>
+
+<p>风格奖励公式：</p>
+<pre><code>style_reward = clip(1 - 0.25 · (d - 1)², min=0)</code></pre>
+
+<p>当 D 太强时，d 接近 -1（比如 d = -0.95）：</p>
+<pre><code>1 - 0.25 · (-0.95 - 1)²
+= 1 - 0.25 · 3.8025
+= 1 - 0.95
+= 0.05    ← 这个值大于 0, 没被 clip 掉!
+</code></pre>
+
+<p><span class="highlight">等一下，clip(min=0) 不是根因。</span>即使没有 clip，0.05 本身也已经很小了。</p>
+</div>
+
+<div class="box">
+<h3>1.2 真正原因：平方函数天然惩罚远离 +1</h3>
+
+<p>把奖励函数画出来：</p>
+<svg id="function-svg" width="100%" height="350" viewBox="0 0 800 350"></svg>
+
+<p>这是一条<span class="highlight">凸函数</span>，离 d = +1 越远，奖励越低。设 \(x = d - 1\)：</p>
+<ul>
+<li>\(x = 0\)（d = 1）：reward = 1（满分）</li>
+<li>\(x = -1\)（d = 0）：reward = 0.75</li>
+<li>\(x = -2\)（d = -1）：reward = 0</li>
+</ul>
+
+<p><span class="danger">关键问题：</span>当 d = -0.95 时，奖励只有 0.05——G1 收到的信号极弱。</p>
+</div>
+
+<div class="box">
+<h3>1.3 D 太强时的真正问题：奖励绝对值小 + G1 难逃低分区</h3>
+
+<p>对 reward 关于 d 求导：</p>
+<p>$$\frac{d}{dd} r_{\text{style}} = -0.5(d - 1) = 0.5(1 - d)$$</p>
+
+<p><span class="highlight">关键纠正：</span>局部斜率在 d=-1 处是 <strong>1.0（最大）</strong>，不是 0。前面说"梯度消失"是误导。真实问题分两层：</p>
+
+<div style="background: rgba(255,82,82,0.1); padding: 12px; border-left: 3px solid #ff5252; border-radius: 0 8px 8px 0; margin: 10px 0;">
+  <p><strong>问题 1：绝对值小</strong></p>
+  <p>G1 在 d=-0.95 时拿到的 reward = <strong>0.05</strong>——无论怎么局部斜率，<strong>绝对值</strong>几乎为 0。PPO 看的是绝对值，不是斜率。</p>
+</div>
+
+<div style="background: rgba(255,82,82,0.1); padding: 12px; border-left: 3px solid #ff5252; border-radius: 0 8px 8px 0; margin: 10px 0;">
+  <p><strong>问题 2：G1 难逃低分区</strong></p>
+  <p>D 太强时，G1 长期处于 d ∈ [-1, -0.5]——这是 D 判定的"明显不像人"区。<strong>要让 d 跳出这个区需要极大努力</strong>，G1 努力 0.1 只能爬到 -0.85，<strong>永远拿不到 0.8+ 的高分</strong>。</p>
+</div>
+
+<div class="interactive-controls">
+  <div class="slider-row">
+    <label>当前 d：</label>
+    <input type="range" id="dSlider1" min="-100" max="100" value="80">
+    <span class="value-display" id="dVal1">+0.80</span>
+  </div>
+  <p style="color:#888; font-size:0.9em;">拖动改变 d，看 reward 绝对值和"对改进 0.1 的敏感度"</p>
+</div>
+
+<svg id="gradient-svg" width="100%" height="400" viewBox="0 0 800 400"></svg>
+
+<div class="step-box">
+  <p><span class="step-num">1</span> <span class="good">d = +0.8（健康）</span>：reward = 0.98，改进 0.1 后 0.99（提升 0.01，但起点已很高）</p>
+</div>
+
+<div class="step-box">
+  <p><span class="step-num">2</span> <span class="good">d = 0（中等）</span>：reward = 0.75，改进 0.1 后 0.80（提升 0.05）</p>
+</div>
+
+<div class="step-box">
+  <p><span class="step-num">3</span> <span class="danger">d = -0.95（D 太强）</span>：reward = 0.05，改进 0.1 后 0.14（<strong>提升 0.095 最大</strong>，但绝对值仍很低）</p>
+</div>
+
+<p><span class="danger">但注意</span>：在 d = -0.95 处 G1 改进 0.1 极难——这是 95% 准确率 D 的"非人类区"，G1 几乎过不来。</p>
+</div>
+
+<div class="box">
+<h3>1.4 D 太强时真正的灾难：完全陷入低分区域</h3>
+
+<p>不是"奖励接近 0"（虽然小但有），而是 <span class="highlight">"G1 怎么努力都到不了高分区"</span>：</p>
+
+<svg id="regime-svg" width="100%" height="350" viewBox="0 0 800 350"></svg>
+
+<table>
+<tr><th>区间</th><th>含义</th><th>PPO 感受</th></tr>
+<tr><td style="color:#00ff88">d ∈ [+0.5, +1]</td><td>D 认为"像人"</td><td>style_reward > 0.94，PPO 感觉良好但改进空间小</td></tr>
+<tr><td style="color:#ffeb3b">d ∈ [-0.5, +0.5]</td><td>D "模糊地带"</td><td>reward 0.5~0.94，<span class="highlight">梯度最丰富</span></td></tr>
+<tr><td style="color:#ff5252">d ∈ [-1, -0.5]</td><td>D 认为"不像人"</td><td>reward 0.05~0.5，奖励低，<span class="highlight">G1 改进后仍滞留此区</span></td></tr>
+</table>
+
+<p><span class="highlight">D 太强</span>把 G1 一直困在 [-1, -0.5] 区间，G1 努力也只能爬到 [-0.7, -0.3]，永远拿不到 0.8+ 的高分。</p>
+
+<p>PPO 看到一个永远 0.1~0.3 的奖励，不知道怎么跳出这个区间——<span class="danger">这就是"D 太强导致训练失败"的真正含义</span>。</p>
+</div>
+
+<!-- ============ 问题 2 ============ -->
+<h2 id="q2">问题 2: 为什么不设计自带梯度的奖励？</h2>
+
+<div class="box">
+<h3>2.1 直觉：好像 (d+1)/2 永远有梯度</h3>
+
+<p>假设我们改用：</p>
+<pre><code>style_reward = (d + 1) / 2   # d ∈ [-1, 1] → reward ∈ [0, 1]</code></pre>
+
+<p>看起来"永远有梯度"：</p>
+<ul>
+<li>d = -0.99 时 reward = 0.005（虽然小但不为 0）</li>
+<li>d = -0.5 时 reward = 0.25</li>
+<li>d = +0.5 时 reward = 0.75</li>
+</ul>
+
+<p><span class="highlight">问题在哪？</span>看 D 太强时：</p>
+
+<svg id="linear-svg" width="100%" height="350" viewBox="0 0 800 350"></svg>
+
+<p>看起来也很糟糕！d = -0.95 时 reward = 0.025——还是几乎为 0！</p>
+</div>
+
+<div class="box">
+<h3>2.2 根本限制：D 的输出范围是 [-1, +1]</h3>
+
+<p><span class="highlight">关键洞察：</span>无论用什么函数，只要 D 的输出有界，<span class="danger">G1 收到的奖励就受限于 D 的"宽容度"</span>。</p>
+
+<p>如果 D 太强，无论 f(d) 长什么样，<span class="danger">f(远离+1) 都会很小</span>：</p>
+<table>
+<tr><th>奖励函数</th><th>d=+0.9</th><th>d=0</th><th>d=-0.9</th></tr>
+<tr><td><code>1 - 0.25(d-1)²</code></td><td>0.99</td><td>0.75</td><td>0.01</td></tr>
+<tr><td><code>(d+1)/2</code></td><td>0.95</td><td>0.50</td><td>0.05</td></tr>
+<tr><td><code>max(0, d+0.5)</code></td><td>1.0</td><td>0.5</td><td>0</td></tr>
+<tr><td><code>log(1+exp(d·5))/log(1+exp(5))</code></td><td>0.99</td><td>0.50</td><td>0.01</td></tr>
+</table>
+
+<p><span class="danger">所有奖励函数在 d 远离 +1 时都很小</span>——这不是函数选错了，是 D 强弱的本质问题。</p>
+</div>
+
+<div class="box">
+<h3>2.3 更深的问题：奖励函数的"标准"从哪来？</h3>
+
+<p>如果不用 D 算奖励，<span class="highlight">我们需要自己定义"什么是好动作"</span>。这才是根本难题：</p>
+
+<div class="step-box">
+  <p><span class="step-num">A</span> <strong>方案 A：关节角距离</strong></p>
+  <p>奖励 = -||关节角 - 专家关节角||²</p>
+  <p><span class="danger">问题：</span> 走路时关节角范围很广，"距离" 难以定义"步态风格"。只能惩罚"姿势偏差"，不能学"运动模式"。</p>
+</div>
+
+<div class="step-box">
+  <p><span class="step-num">B</span> <strong>方案 B：物理量距离</strong></p>
+  <p>奖励 = -||base 高度变化 - 专家 base 高度变化||²</p>
+  <p><span class="danger">问题：</span> 选哪些物理量？步态周期、左右对称、关节协调……每加一个都需要手动调权重。</p>
+</div>
+
+<div class="step-box">
+  <p><span class="step-num">C</span> <strong>方案 C：分类器 D</strong></p>
+  <p>奖励 = D(状态) 输出经过变换</p>
+  <p><span class="good">优势：</span> D 自己学"什么是好"，不需要人手设计</p>
+  <p><span class="danger">代价：</span> 奖励依赖 D，D 太强就崩</p>
+</div>
+
+<p><span class="highlight">这就是 AMP 的核心权衡</span>：</p>
+<pre><code>  手设计奖励
+      ↓
+   简单但不准（学不到"风格"）
+      ↓
+  D 自动学奖励
+      ↓
+   准确但有"训练平衡"问题 ← 我们在这里
+</code></pre>
+</div>
+
+<div class="box">
+<h3>2.4 为什么不"既要 D 又要平滑奖励"？</h3>
+
+<p>可以试！比如：</p>
+<pre><code>style_reward = (d + 1) / 2 + ε · reward_signal_strength(d)
+# 后者是某种"奖励置信度",让 G1 知道"我的动作离像人多远"
+</code></pre>
+
+<p>但这就<span class="highlight">需要额外设计"置信度"</span>——又回到了"人手定义"的死循环。</p>
+
+<p>或者可以试：</p>
+<pre><code>style_reward = max(0, d)   # 把负数全归零
+</code></pre>
+
+<p>但 d 永远接近 -1 时，reward 全是 0，等于没训练。</p>
+</div>
+
+<!-- ============ 对比 ============ -->
+<h2 id="compare">问题 1 vs 问题 2 的关系</h2>
+
+<div class="box">
+
+<svg width="100%" height="380" viewBox="0 0 1000 380">
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <polygon points="0 0, 9 3, 0 6" fill="#888"/>
+    </marker>
+  </defs>
+
+  <rect x="20" y="40" width="280" height="80" rx="10" fill="#0d1421" stroke="#ff5252" stroke-width="2"/>
+  <text x="160" y="65" fill="#ff5252" font-weight="700" font-size="14" text-anchor="middle">D 太强</text>
+  <text x="160" y="90" fill="#e0e0e0" font-size="12" text-anchor="middle">G1 永远在 d ∈ [-1, -0.5]</text>
+  <text x="160" y="110" fill="#e0e0e0" font-size="12" text-anchor="middle">无论什么奖励都 ≈ 0</text>
+
+  <rect x="360" y="40" width="280" height="80" rx="10" fill="#0d1421" stroke="#ffeb3b" stroke-width="2"/>
+  <text x="500" y="65" fill="#ffeb3b" font-weight="700" font-size="14" text-anchor="middle">换奖励函数?</text>
+  <text x="500" y="90" fill="#e0e0e0" font-size="12" text-anchor="middle">仍然受 D 范围 [-1,1] 限制</text>
+  <text x="500" y="110" fill="#e0e0e0" font-size="12" text-anchor="middle">d 远离 +1 时仍然 ≈ 0</text>
+
+  <rect x="700" y="40" width="280" height="80" rx="10" fill="#0d1421" stroke="#00ff88" stroke-width="2"/>
+  <text x="840" y="65" fill="#00ff88" font-weight="700" font-size="14" text-anchor="middle">解法</text>
+  <text x="840" y="90" fill="#e0e0e0" font-size="12" text-anchor="middle">让 D 不那么强</text>
+  <text x="840" y="110" fill="#e0e0e0" font-size="12" text-anchor="middle">让 d 留在 [-0.5, +1] 区间</text>
+
+  <line x1="300" y1="80" x2="360" y2="80" stroke="#888" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="640" y1="80" x2="700" y2="80" stroke="#888" stroke-width="2" marker-end="url(#arr)"/>
+
+  <text x="160" y="180" fill="#888" font-size="12" text-anchor="middle">问题 1</text>
+  <text x="500" y="180" fill="#888" font-size="12" text-anchor="middle">问题 2</text>
+  <text x="840" y="180" fill="#888" font-size="12" text-anchor="middle">方案</text>
+
+  <rect x="100" y="220" width="800" height="120" rx="10" fill="#0d1421" stroke="#3a47d5" stroke-width="2"/>
+  <text x="500" y="250" fill="#00d2ff" font-weight="700" font-size="16" text-anchor="middle">两问题的共同根因</text>
+  <text x="500" y="280" fill="#e0e0e0" font-size="13" text-anchor="middle">D 的输出有界 [-1, +1]，强 D 把 G1 推到极端区间</text>
+  <text x="500" y="305" fill="#e0e0e0" font-size="13" text-anchor="middle">无论什么奖励函数，离 +1 远都 → 奖励低</text>
+  <text x="500" y="330" fill="#ffeb3b" font-size="13" text-anchor="middle">解法 = 让 G1 留在"温和区间"，即让 D 保持温和准确率</text>
+</svg>
+
+<p><span class="highlight">两问题的本质相同</span>：都是 D 的输出空间有限 + 强 D 把 G1 推到奖励低区。</p>
+</div>
+
+<!-- ============ 总结 ============ -->
+<h2 id="summary">总结</h2>
+
+<div class="box">
+
+<h3>问题 1 的精要回答</h3>
+<p style="background: rgba(255,82,82,0.1); padding: 15px; border-left: 3px solid #ff5252; border-radius: 0 8px 8px 0;">
+<span class="danger">D 太强 → G1 拿到的 d 远离 +1 → 平方奖励函数 1-0.25(d-1)² 在 d 远离 +1 时<span style="text-decoration:underline;">绝对值</span>接近 0 → G1 长期拿到 0.05~0.5 的低分 → PPO 看到一直很低的奖励，没有上升空间 → 训练崩溃。</span>
+</p>
+
+<p style="background: rgba(0,0,0,0.2); padding: 12px; border-left: 3px solid #00d2ff; border-radius: 0 8px 8px 0;">
+<span class="highlight">重要纠正：</span>局部梯度（即"斜率"）在 d=-1 处是 <strong>1.0（最大）</strong>，不是 0。问题不是"梯度消失"，而是<strong>两个层次</strong>：
+<ul style="color: #d0d0d0; margin-left: 20px;">
+  <li><strong>绝对值小</strong>：G1 拿到 0.05，无论怎么改进，绝对值仍很小</li>
+  <li><strong>难逃低分区</strong>：G1 长期在 d ∈ [-1, -0.5]，是 D 判定的"明显不像人"区，<strong>改进极难</strong></li>
+</ul>
+</p>
+
+<h3>问题 2 的精要回答</h3>
+<p style="background: rgba(0,210,255,0.1); padding: 15px; border-left: 3px solid #00d2ff; border-radius: 0 8px 0 8px;">
+<span class="highlight">不能"既要 D 又要平滑奖励"</span>，因为：
+</p>
+<ol style="color: #d0d0d0; margin-left: 20px;">
+  <li>D 的输出有界 [-1, +1]，任何 f(d) 在 d 远离 +1 时都会很小</li>
+  <li>不依赖 D 又想定义"像人"——人手做不到</li>
+  <li>加额外"置信度"或"距离度量"——又回到人手设计</li>
+</ol>
+<p style="background: rgba(0,255,136,0.1); padding: 15px; border-left: 3px solid #00ff88; border-radius: 0 8px 8px 0; margin-top: 10px;">
+<span class="good">AMP 选了"靠 D 自然平衡"：grad_pen 让 D 不会冲到 100% 准确率，G 进步 D 也进步，两者在 70-80% 平衡。</span>这是用神经网络学奖励的必然代价，没有银弹。
+</p>
+
+<h3>两个问题的关系</h3>
+<p>它们是<strong>同一个问题的两面</strong>：</p>
+<ul>
+  <li><strong>问题 1</strong>：强 D 怎么让奖励崩？</li>
+  <li><strong>问题 2</strong>：既然崩了为什么不换奖励？</li>
+</ul>
+<p>答案相同：<span class="highlight">D 强弱决定了奖励信号的丰富度，强 D 必然导致奖励枯竭；用 D 就要接受 D 太强的代价</span>。</p>
+</div>
+
+<p style="text-align:center; color:#888; margin-top:50px;">
+—— 两个核心问题解答 · 配合主教程 <code>AMP_motion_playback.md</code> 和 <code>判别器/index.html</code> 阅读 ——
+</p>
+
+</div>
+
+<script>
+// ===== 问题 1: 奖励函数曲线 =====
+function drawFunctionPlot() {
+  const svg = document.getElementById('function-svg');
+  const W = 800, H = 350;
+  const padX = 70, padY = 50;
+  const plotW = W - padX - 20;
+  const plotH = H - 2 * padY;
+
+  svg.innerHTML = '';
+
+  const title = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  title.setAttribute('x', W/2); title.setAttribute('y', 25);
+  title.setAttribute('class', 'title-text');
+  title.setAttribute('text-anchor', 'middle');
+  title.textContent = 'style_reward = clip(1 - 0.25·(d-1)², min=0)';
+  svg.appendChild(title);
+
+  const xAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  xAxis.setAttribute('x1', padX); xAxis.setAttribute('y1', H - padY);
+  xAxis.setAttribute('x2', W - 20); xAxis.setAttribute('y2', H - padY);
+  xAxis.setAttribute('class', 'axis');
+  svg.appendChild(xAxis);
+  const yAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  yAxis.setAttribute('x1', padX); yAxis.setAttribute('y1', 50);
+  yAxis.setAttribute('x2', padX); yAxis.setAttribute('y2', H - padY);
+  yAxis.setAttribute('class', 'axis');
+  svg.appendChild(yAxis);
+
+  for (let d = -1; d <= 1.001; d += 0.5) {
+    const x = padX + (d + 1) / 2 * plotW;
+    const grid = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    grid.setAttribute('x1', x); grid.setAttribute('y1', 50);
+    grid.setAttribute('x2', x); grid.setAttribute('y2', H - padY);
+    grid.setAttribute('class', 'grid');
+    svg.appendChild(grid);
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', x); label.setAttribute('y', H - padY + 18);
+    label.setAttribute('class', 'label'); label.setAttribute('text-anchor', 'middle');
+    label.textContent = d.toFixed(1);
+    svg.appendChild(label);
+  }
+  for (let r = 0; r <= 1.001; r += 0.25) {
+    const y = H - padY - r * plotH;
+    const grid = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    grid.setAttribute('x1', padX); grid.setAttribute('y1', y);
+    grid.setAttribute('x2', W - 20); grid.setAttribute('y2', y);
+    grid.setAttribute('class', 'grid');
+    svg.appendChild(grid);
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', padX - 8); label.setAttribute('y', y + 4);
+    label.setAttribute('class', 'label'); label.setAttribute('text-anchor', 'end');
+    label.textContent = r.toFixed(2);
+    svg.appendChild(label);
+  }
+
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  let d = '';
+  for (let dd = -1; dd <= 1.001; dd += 0.02) {
+    const r = Math.max(0, 1 - 0.25 * (dd - 1) ** 2);
+    const x = padX + (dd + 1) / 2 * plotW;
+    const y = H - padY - r * plotH;
+    d += (d === '' ? 'M' : 'L') + x + ',' + y + ' ';
+  }
+  path.setAttribute('d', d);
+  path.setAttribute('stroke', '#ffeb3b'); path.setAttribute('stroke-width', '3');
+  path.setAttribute('fill', 'none');
+  svg.appendChild(path);
+
+  const pts = [
+    { d: 1.0, label: 'd=+1 满分', color: '#00ff88' },
+    { d: 0.0, label: 'd=0 健康', color: '#00d2ff' },
+    { d: -0.5, label: 'd=-0.5', color: '#ffeb3b' },
+    { d: -0.95, label: 'd=-0.95 (D太强)', color: '#ff5252' },
+  ];
+  pts.forEach(pt => {
+    const r = Math.max(0, 1 - 0.25 * (pt.d - 1) ** 2);
+    const x = padX + (pt.d + 1) / 2 * plotW;
+    const y = H - padY - r * plotH;
+    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    dot.setAttribute('cx', x); dot.setAttribute('cy', y);
+    dot.setAttribute('r', 6); dot.setAttribute('fill', pt.color);
+    svg.appendChild(dot);
+    const lbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    lbl.setAttribute('x', x); lbl.setAttribute('y', y - 12);
+    lbl.setAttribute('text-anchor', 'middle');
+    lbl.setAttribute('fill', pt.color); lbl.setAttribute('font-size', '11');
+    lbl.setAttribute('font-weight', '600');
+    lbl.textContent = pt.label;
+    svg.appendChild(lbl);
+  });
+
+  const xLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  xLabel.setAttribute('x', W/2); xLabel.setAttribute('y', H - 5);
+  xLabel.setAttribute('class', 'label'); xLabel.setAttribute('text-anchor', 'middle');
+  xLabel.textContent = "D 的输出 d";
+  svg.appendChild(xLabel);
+  const yLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  yLabel.setAttribute('x', 20); yLabel.setAttribute('y', H/2);
+  yLabel.setAttribute('class', 'label'); yLabel.setAttribute('text-anchor', 'middle');
+  yLabel.setAttribute('transform', `rotate(-90 20 ${H/2})`);
+  yLabel.textContent = "style_reward";
+  svg.appendChild(yLabel);
+}
+
+// ===== 问题 1: 梯度敏感度 =====
+function drawGradientPlot() {
+  const svg = document.getElementById('gradient-svg');
+  const d = parseFloat(document.getElementById('dSlider1').value) / 100;
+  document.getElementById('dVal1').textContent = (d >= 0 ? '+' : '') + d.toFixed(2);
+
+  const W = 800, H = 400;
+  const padX = 70, padY = 60;
+  const plotW = W - padX - 20;
+  const plotH = H - 2 * padY - 30;
+
+  svg.innerHTML = '';
+
+  const rCur = Math.max(0, 1 - 0.25 * (d - 1) ** 2);
+  const title = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  title.setAttribute('x', W/2); title.setAttribute('y', 25);
+  title.setAttribute('class', 'title-text');
+  title.setAttribute('text-anchor', 'middle');
+  title.textContent = `当前 d = ${(d >= 0 ? '+' : '') + d.toFixed(2)}, reward = ${rCur.toFixed(3)}`;
+  svg.appendChild(title);
+
+  const xAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  xAxis.setAttribute('x1', padX); xAxis.setAttribute('y1', H - padY);
+  xAxis.setAttribute('x2', W - 20); xAxis.setAttribute('y2', H - padY);
+  xAxis.setAttribute('class', 'axis');
+  svg.appendChild(xAxis);
+  const yAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  yAxis.setAttribute('x1', padX); yAxis.setAttribute('y1', 50);
+  yAxis.setAttribute('x2', padX); yAxis.setAttribute('y2', H - padY);
+  yAxis.setAttribute('class', 'axis');
+  svg.appendChild(yAxis);
+
+  for (let dd = -1; dd <= 1.001; dd += 0.5) {
+    const x = padX + (dd + 1) / 2 * plotW;
+    const grid = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    grid.setAttribute('x1', x); grid.setAttribute('y1', 50);
+    grid.setAttribute('x2', x); grid.setAttribute('y2', H - padY);
+    grid.setAttribute('class', 'grid');
+    svg.appendChild(grid);
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', x); label.setAttribute('y', H - padY + 18);
+    label.setAttribute('class', 'label'); label.setAttribute('text-anchor', 'middle');
+    label.textContent = dd.toFixed(1);
+    svg.appendChild(label);
+  }
+  for (let r = 0; r <= 1.001; r += 0.25) {
+    const y = H - padY - r * plotH;
+    const grid = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    grid.setAttribute('x1', padX); grid.setAttribute('y1', y);
+    grid.setAttribute('x2', W - 20); grid.setAttribute('y2', y);
+    grid.setAttribute('class', 'grid');
+    svg.appendChild(grid);
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', padX - 8); label.setAttribute('y', y + 4);
+    label.setAttribute('class', 'label'); label.setAttribute('text-anchor', 'end');
+    label.textContent = r.toFixed(2);
+    svg.appendChild(label);
+  }
+
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  let pp = '';
+  for (let dd = -1; dd <= 1.001; dd += 0.02) {
+    const r = Math.max(0, 1 - 0.25 * (dd - 1) ** 2);
+    const x = padX + (dd + 1) / 2 * plotW;
+    const y = H - padY - r * plotH;
+    pp += (pp === '' ? 'M' : 'L') + x + ',' + y + ' ';
+  }
+  path.setAttribute('d', pp);
+  path.setAttribute('stroke', '#ffeb3b'); path.setAttribute('stroke-width', '2.5');
+  path.setAttribute('fill', 'none');
+  svg.appendChild(path);
+
+  const xCur = padX + (d + 1) / 2 * plotW;
+  const yCur = H - padY - rCur * plotH;
+  const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  dot.setAttribute('cx', xCur); dot.setAttribute('cy', yCur);
+  dot.setAttribute('r', 8); dot.setAttribute('fill', '#ff6b9d');
+  dot.setAttribute('stroke', '#fff'); dot.setAttribute('stroke-width', '2');
+  svg.appendChild(dot);
+
+  const dNew = Math.min(1, d + 0.1);
+  const rNew = Math.max(0, 1 - 0.25 * (dNew - 1) ** 2);
+  const xNew = padX + (dNew + 1) / 2 * plotW;
+  const yNew = H - padY - rNew * plotH;
+  const dot2 = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  dot2.setAttribute('cx', xNew); dot2.setAttribute('cy', yNew);
+  dot2.setAttribute('r', 8); dot2.setAttribute('fill', '#00ff88');
+  dot2.setAttribute('stroke', '#fff'); dot2.setAttribute('stroke-width', '2');
+  svg.appendChild(dot2);
+
+  const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  arrow.setAttribute('x1', xCur); arrow.setAttribute('y1', yCur);
+  arrow.setAttribute('x2', xNew); arrow.setAttribute('y2', yNew);
+  arrow.setAttribute('stroke', '#00ff88'); arrow.setAttribute('stroke-width', '2');
+  arrow.setAttribute('stroke-dasharray', '4,4');
+  svg.appendChild(arrow);
+
+  const ann = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  ann.setAttribute('x', (xCur + xNew) / 2);
+  ann.setAttribute('y', (yCur + yNew) / 2 - 8);
+  ann.setAttribute('text-anchor', 'middle');
+  ann.setAttribute('fill', '#00ff88'); ann.setAttribute('font-size', '12');
+  ann.setAttribute('font-weight', '600');
+  ann.textContent = `Δ reward = +${(rNew - rCur).toFixed(3)}`;
+  svg.appendChild(ann);
+
+  const xLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  xLabel.setAttribute('x', W/2); xLabel.setAttribute('y', H - 5);
+  xLabel.setAttribute('class', 'label'); xLabel.setAttribute('text-anchor', 'middle');
+  xLabel.textContent = "D 的输出 d";
+  svg.appendChild(xLabel);
+  const yLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  yLabel.setAttribute('x', 20); yLabel.setAttribute('y', H/2);
+  yLabel.setAttribute('class', 'label'); yLabel.setAttribute('text-anchor', 'middle');
+  yLabel.setAttribute('transform', `rotate(-90 20 ${H/2})`);
+  yLabel.textContent = "style_reward";
+  svg.appendChild(yLabel);
+
+  const leg = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  leg.setAttribute('x', W - 20); leg.setAttribute('y', 60);
+  leg.setAttribute('text-anchor', 'end');
+  leg.setAttribute('fill', '#888'); leg.setAttribute('font-size', '11');
+  leg.textContent = "● 当前 d  ● 改进 0.1 后";
+  svg.appendChild(leg);
+}
+
+// ===== 问题 1: 区域图 =====
+function drawRegimePlot() {
+  const svg = document.getElementById('regime-svg');
+  const W = 800, H = 350;
+  const padX = 70, padY = 50;
+  const plotW = W - padX - 20;
+  const plotH = H - 2 * padY;
+
+  svg.innerHTML = '';
+
+  const title = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  title.setAttribute('x', W/2); title.setAttribute('y', 25);
+  title.setAttribute('class', 'title-text');
+  title.setAttribute('text-anchor', 'middle');
+  title.textContent = 'D 太强时 G1 永远困在"低分沼泽"';
+  svg.appendChild(title);
+
+  const xAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  xAxis.setAttribute('x1', padX); xAxis.setAttribute('y1', H - padY);
+  xAxis.setAttribute('x2', W - 20); xAxis.setAttribute('y2', H - padY);
+  xAxis.setAttribute('class', 'axis');
+  svg.appendChild(xAxis);
+  const yAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  yAxis.setAttribute('x1', padX); yAxis.setAttribute('y1', 50);
+  yAxis.setAttribute('x2', padX); yAxis.setAttribute('y2', H - padY);
+  yAxis.setAttribute('class', 'axis');
+  svg.appendChild(yAxis);
+
+  // 三个区域的背景
+  const x1 = padX;
+  const x2 = padX + (-0.5 + 1) / 2 * plotW;
+  const rect1 = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect1.setAttribute('x', x1); rect1.setAttribute('y', 50);
+  rect1.setAttribute('width', x2 - x1); rect1.setAttribute('height', plotH);
+  rect1.setAttribute('fill', 'rgba(255,82,82,0.2)');
+  rect1.setAttribute('stroke', 'rgba(255,82,82,0.5)');
+  rect1.setAttribute('stroke-dasharray', '4,4');
+  rect1.setAttribute('stroke-width', '1');
+  svg.appendChild(rect1);
+
+  const x3 = padX + (0.5 + 1) / 2 * plotW;
+  const rect2 = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect2.setAttribute('x', x2); rect2.setAttribute('y', 50);
+  rect2.setAttribute('width', x3 - x2); rect2.setAttribute('height', plotH);
+  rect2.setAttribute('fill', 'rgba(255,235,59,0.15)');
+  rect2.setAttribute('stroke', 'rgba(255,235,59,0.5)');
+  rect2.setAttribute('stroke-dasharray', '4,4');
+  rect2.setAttribute('stroke-width', '1');
+  svg.appendChild(rect2);
+
+  const rect3 = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect3.setAttribute('x', x3); rect3.setAttribute('y', 50);
+  rect3.setAttribute('width', W - 20 - x3); rect3.setAttribute('height', plotH);
+  rect3.setAttribute('fill', 'rgba(0,255,136,0.15)');
+  rect3.setAttribute('stroke', 'rgba(0,255,136,0.5)');
+  rect3.setAttribute('stroke-dasharray', '4,4');
+  rect3.setAttribute('stroke-width', '1');
+  svg.appendChild(rect3);
+
+  const lbl1 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  lbl1.setAttribute('x', (x1 + x2) / 2); lbl1.setAttribute('y', 70);
+  lbl1.setAttribute('text-anchor', 'middle');
+  lbl1.setAttribute('fill', '#ff5252'); lbl1.setAttribute('font-weight', '700');
+  lbl1.setAttribute('font-size', '13');
+  lbl1.textContent = '低分沼泽';
+  svg.appendChild(lbl1);
+  const lbl1b = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  lbl1b.setAttribute('x', (x1 + x2) / 2); lbl1b.setAttribute('y', 90);
+  lbl1b.setAttribute('text-anchor', 'middle');
+  lbl1b.setAttribute('fill', '#ff5252'); lbl1b.setAttribute('font-size', '11');
+  lbl1b.textContent = 'reward < 0.5';
+  svg.appendChild(lbl1b);
+
+  const lbl2 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  lbl2.setAttribute('x', (x2 + x3) / 2); lbl2.setAttribute('y', 70);
+  lbl2.setAttribute('text-anchor', 'middle');
+  lbl2.setAttribute('fill', '#ffeb3b'); lbl2.setAttribute('font-weight', '700');
+  lbl2.setAttribute('font-size', '13');
+  lbl2.textContent = '健康区间';
+  svg.appendChild(lbl2);
+  const lbl2b = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  lbl2b.setAttribute('x', (x2 + x3) / 2); lbl2b.setAttribute('y', 90);
+  lbl2b.setAttribute('text-anchor', 'middle');
+  lbl2b.setAttribute('fill', '#ffeb3b'); lbl2b.setAttribute('font-size', '11');
+  lbl2b.textContent = 'reward 0.5~0.9';
+  svg.appendChild(lbl2b);
+
+  const lbl3 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  lbl3.setAttribute('x', (x3 + (W - 20)) / 2); lbl3.setAttribute('y', 70);
+  lbl3.setAttribute('text-anchor', 'middle');
+  lbl3.setAttribute('fill', '#00ff88'); lbl3.setAttribute('font-weight', '700');
+  lbl3.setAttribute('font-size', '13');
+  lbl3.textContent = '高分区';
+  svg.appendChild(lbl3);
+  const lbl3b = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  lbl3b.setAttribute('x', (x3 + (W - 20)) / 2); lbl3b.setAttribute('y', 90);
+  lbl3b.setAttribute('text-anchor', 'middle');
+  lbl3b.setAttribute('fill', '#00ff88'); lbl3b.setAttribute('font-size', '11');
+  lbl3b.textContent = 'reward > 0.9';
+  svg.appendChild(lbl3b);
+
+  const dStuck = -0.8;
+  const xStuck = padX + (dStuck + 1) / 2 * plotW;
+  const yStuck = 200;
+  const stuckDot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  stuckDot.setAttribute('cx', xStuck); stuckDot.setAttribute('cy', yStuck);
+  stuckDot.setAttribute('r', 12); stuckDot.setAttribute('fill', '#ff6b9d');
+  stuckDot.setAttribute('stroke', '#fff'); stuckDot.setAttribute('stroke-width', '2');
+  svg.appendChild(stuckDot);
+
+  const stuckLbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  stuckLbl.setAttribute('x', xStuck); stuckLbl.setAttribute('y', yStuck + 35);
+  stuckLbl.setAttribute('text-anchor', 'middle');
+  stuckLbl.setAttribute('fill', '#ff6b9d'); stuckLbl.setAttribute('font-weight', '600');
+  stuckLbl.textContent = 'G1 在 d=-0.8';
+  svg.appendChild(stuckLbl);
+
+  for (let i = 0; i < 4; i++) {
+    const dJ = -0.8 + i * 0.15;
+    const xJ = padX + (dJ + 1) / 2 * plotW;
+    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    dot.setAttribute('cx', xJ); dot.setAttribute('cy', 230 + i * 5);
+    dot.setAttribute('r', 5); dot.setAttribute('fill', '#ff6b9d');
+    dot.setAttribute('opacity', 0.5 - i * 0.1);
+    svg.appendChild(dot);
+  }
+
+  for (let d = -1; d <= 1.001; d += 0.5) {
+    const x = padX + (d + 1) / 2 * plotW;
+    const lbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    lbl.setAttribute('x', x); lbl.setAttribute('y', H - padY + 18);
+    lbl.setAttribute('class', 'label'); lbl.setAttribute('text-anchor', 'middle');
+    lbl.textContent = d.toFixed(1);
+    svg.appendChild(lbl);
+  }
+  const xLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  xLabel.setAttribute('x', W/2); xLabel.setAttribute('y', H - 5);
+  xLabel.setAttribute('class', 'label'); xLabel.setAttribute('text-anchor', 'middle');
+  xLabel.textContent = "D 的输出 d";
+  svg.appendChild(xLabel);
+}
+
+// ===== 问题 2: 线性奖励对比 =====
+function drawLinearPlot() {
+  const svg = document.getElementById('linear-svg');
+  const W = 800, H = 350;
+  const padX = 70, padY = 50;
+  const plotW = W - padX - 20;
+  const plotH = H - 2 * padY;
+
+  svg.innerHTML = '';
+
+  const title = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  title.setAttribute('x', W/2); title.setAttribute('y', 25);
+  title.setAttribute('class', 'title-text');
+  title.setAttribute('text-anchor', 'middle');
+  title.textContent = '换成 (d+1)/2 看起来更平滑，但 D 太强时 d=-0.95 → reward=0.025 同样 ≈ 0';
+  svg.appendChild(title);
+
+  const xAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  xAxis.setAttribute('x1', padX); xAxis.setAttribute('y1', H - padY);
+  xAxis.setAttribute('x2', W - 20); xAxis.setAttribute('y2', H - padY);
+  xAxis.setAttribute('class', 'axis');
+  svg.appendChild(xAxis);
+  const yAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  yAxis.setAttribute('x1', padX); yAxis.setAttribute('y1', 50);
+  yAxis.setAttribute('x2', padX); yAxis.setAttribute('y2', H - padY);
+  yAxis.setAttribute('class', 'axis');
+  svg.appendChild(yAxis);
+
+  for (let dd = -1; dd <= 1.001; dd += 0.5) {
+    const x = padX + (dd + 1) / 2 * plotW;
+    const grid = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    grid.setAttribute('x1', x); grid.setAttribute('y1', 50);
+    grid.setAttribute('x2', x); grid.setAttribute('y2', H - padY);
+    grid.setAttribute('class', 'grid');
+    svg.appendChild(grid);
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', x); label.setAttribute('y', H - padY + 18);
+    label.setAttribute('class', 'label'); label.setAttribute('text-anchor', 'middle');
+    label.textContent = dd.toFixed(1);
+    svg.appendChild(label);
+  }
+  for (let r = 0; r <= 1.001; r += 0.25) {
+    const y = H - padY - r * plotH;
+    const grid = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    grid.setAttribute('x1', padX); grid.setAttribute('y1', y);
+    grid.setAttribute('x2', W - 20); grid.setAttribute('y2', y);
+    grid.setAttribute('class', 'grid');
+    svg.appendChild(grid);
+  }
+
+  // 线性 (d+1)/2
+  const path1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  let p1 = '';
+  for (let dd = -1; dd <= 1.001; dd += 0.02) {
+    const r = (dd + 1) / 2;
+    const x = padX + (dd + 1) / 2 * plotW;
+    const y = H - padY - r * plotH;
+    p1 += (p1 === '' ? 'M' : 'L') + x + ',' + y + ' ';
+  }
+  path1.setAttribute('d', p1);
+  path1.setAttribute('stroke', '#00d2ff'); path1.setAttribute('stroke-width', '2.5');
+  path1.setAttribute('fill', 'none');
+  svg.appendChild(path1);
+
+  // LSGAN 1-0.25(d-1)²
+  const path2 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  let p2 = '';
+  for (let dd = -1; dd <= 1.001; dd += 0.02) {
+    const r = Math.max(0, 1 - 0.25 * (dd - 1) ** 2);
+    const x = padX + (dd + 1) / 2 * plotW;
+    const y = H - padY - r * plotH;
+    p2 += (p2 === '' ? 'M' : 'L') + x + ',' + y + ' ';
+  }
+  path2.setAttribute('d', p2);
+  path2.setAttribute('stroke', '#ffeb3b'); path2.setAttribute('stroke-width', '2.5');
+  path2.setAttribute('fill', 'none');
+  path2.setAttribute('stroke-dasharray', '6,4');
+  svg.appendChild(path2);
+
+  const lab1 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  lab1.setAttribute('x', W - 30); lab1.setAttribute('y', 110);
+  lab1.setAttribute('text-anchor', 'end');
+  lab1.setAttribute('fill', '#00d2ff'); lab1.setAttribute('font-size', '12');
+  lab1.setAttribute('font-weight', '600');
+  lab1.textContent = '— (d+1)/2  线性';
+  svg.appendChild(lab1);
+
+  const lab2 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  lab2.setAttribute('x', W - 30); lab2.setAttribute('y', 130);
+  lab2.setAttribute('text-anchor', 'end');
+  lab2.setAttribute('fill', '#ffeb3b'); lab2.setAttribute('font-size', '12');
+  lab2.setAttribute('font-weight', '600');
+  lab2.textContent = '--- 1-0.25(d-1)² LSGAN';
+  svg.appendChild(lab2);
+
+  const dBad = -0.95;
+  const xBad = padX + (dBad + 1) / 2 * plotW;
+  const rBad1 = (dBad + 1) / 2;
+  const yBad1 = H - padY - rBad1 * plotH;
+  const rBad2 = Math.max(0, 1 - 0.25 * (dBad - 1) ** 2);
+  const yBad2 = H - padY - rBad2 * plotH;
+
+  const dot1 = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  dot1.setAttribute('cx', xBad); dot1.setAttribute('cy', yBad1);
+  dot1.setAttribute('r', 6); dot1.setAttribute('fill', '#00d2ff');
+  svg.appendChild(dot1);
+  const dot2 = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  dot2.setAttribute('cx', xBad); dot2.setAttribute('cy', yBad2);
+  dot2.setAttribute('r', 6); dot2.setAttribute('fill', '#ffeb3b');
+  svg.appendChild(dot2);
+
+  const badLbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  badLbl.setAttribute('x', xBad + 10); badLbl.setAttribute('y', yBad1 - 5);
+  badLbl.setAttribute('fill', '#888'); badLbl.setAttribute('font-size', '10');
+  badLbl.textContent = 'd=-0.95';
+  svg.appendChild(badLbl);
+  const badLbl2 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  badLbl2.setAttribute('x', xBad + 10); badLbl2.setAttribute('y', yBad2 + 15);
+  badLbl2.setAttribute('fill', '#888'); badLbl2.setAttribute('font-size', '10');
+  badLbl2.textContent = '两曲线都接近 0';
+  svg.appendChild(badLbl2);
+
+  const xLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  xLabel.setAttribute('x', W/2); xLabel.setAttribute('y', H - 5);
+  xLabel.setAttribute('class', 'label'); xLabel.setAttribute('text-anchor', 'middle');
+  xLabel.textContent = "D 的输出 d";
+  svg.appendChild(xLabel);
+  const yLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  yLabel.setAttribute('x', 20); yLabel.setAttribute('y', H/2);
+  yLabel.setAttribute('class', 'label'); yLabel.setAttribute('text-anchor', 'middle');
+  yLabel.setAttribute('transform', `rotate(-90 20 ${H/2})`);
+  yLabel.textContent = "reward";
+  svg.appendChild(yLabel);
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  drawFunctionPlot();
+  drawGradientPlot();
+  drawRegimePlot();
+  drawLinearPlot();
+  document.getElementById('dSlider1').addEventListener('input', drawGradientPlot);
+});
+</script>
+
+</body>
+</html>
