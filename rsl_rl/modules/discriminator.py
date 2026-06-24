@@ -147,11 +147,11 @@ class Discriminator(nn.Module):
         # 计算梯度: ∂D/∂x
         # grad_outputs=[2, 3, 5] 意思是：
         # loss = 2*y[0] + 3*y[1] + 5*y[2]
-        # 然后求 ∂loss/∂x
+        # 然后求 ∂loss/∂x，标量对矩阵求导，最终和输入矩阵的维度一样
         grad = autograd.grad(
             outputs=disc,        # 对哪个输出求导 → D(x)
             inputs=expert_data,  # 对哪个输入求导 → x
-            grad_outputs=ones,   # 反向传播时 loss 的梯度（全 1）。起点: ∂loss/∂loss = 1
+            grad_outputs=ones,   # 反向传播时 loss 的梯度（全 1）。起点: ∂loss/∂loss = 1，同时输入不是标量，通过这个求和转成标量，然后求导又是线性的。。此处自己推导一下
             create_graph=True,   # 保留计算图（让 grad_pen 也参与梯度传播）
             retain_graph=True,   # 不释放计算图（上面还有 LSGAN loss 要用）
             only_inputs=True,    # 只对 expert_data 求导，不对其他输入
@@ -159,7 +159,7 @@ class Discriminator(nn.Module):
 
         # 梯度惩罚: λ * ||∇D(x)||² 的均值
         # 目标是让梯度范数接近 0 → D 在专家附近"平"
-        grad_pen = lambda_ * (grad.norm(2, dim=1) - 0).pow(2).mean()
+        grad_pen = lambda_ * (grad.norm(2, dim=1) - 0).pow(2).mean()  # 输出标量
         return grad_pen
 
     def predict_amp_reward(self, state, next_state, task_reward, normalizer=None):
