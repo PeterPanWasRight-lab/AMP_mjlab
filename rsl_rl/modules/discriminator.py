@@ -145,14 +145,17 @@ class Discriminator(nn.Module):
         ones = torch.ones(disc.size(), device=disc.device)
 
         # 计算梯度: ∂D/∂x
+        # grad_outputs=[2, 3, 5] 意思是：
+        # loss = 2*y[0] + 3*y[1] + 5*y[2]
+        # 然后求 ∂loss/∂x
         grad = autograd.grad(
             outputs=disc,        # 对哪个输出求导 → D(x)
             inputs=expert_data,  # 对哪个输入求导 → x
-            grad_outputs=ones,   # 反向传播时 loss 的梯度（全 1）
+            grad_outputs=ones,   # 反向传播时 loss 的梯度（全 1）。起点: ∂loss/∂loss = 1
             create_graph=True,   # 保留计算图（让 grad_pen 也参与梯度传播）
             retain_graph=True,   # 不释放计算图（上面还有 LSGAN loss 要用）
             only_inputs=True,    # 只对 expert_data 求导，不对其他输入
-        )[0]
+        )[0]                     # (N, 390)
 
         # 梯度惩罚: λ * ||∇D(x)||² 的均值
         # 目标是让梯度范数接近 0 → D 在专家附近"平"
