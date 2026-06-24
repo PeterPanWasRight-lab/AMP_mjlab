@@ -19,6 +19,31 @@
 import numpy as np
 import torch
 
+"""
+class ReplayBuffer:
+    self.states        # Tensor: (buffer_size, obs_dim)   ← 所有 s
+    self.next_states   # Tensor: (buffer_size, obs_dim)   ← 所有 s'
+    self.buffer_size   # int: 容量（如 100,000）
+    self.device        # torch device
+    self.step          # int: 当前写入位置（环形指针）
+    self.num_samples   # int: 当前有效样本数
+    -------------------------------------------------------------
+    ┌─────────────────────────────────────────────────────┐
+    │ ReplayBuffer (buffer_size=100000, obs_dim=195)      │
+    │                                                     │
+    │  states:        [s0, s1, s2, ..., s99,999]  (100k×195)
+    │  next_states:   [s0', s1', s2', ..., s99,999']     │
+    │                                                     │
+    │  step=3     num_samples=3   (刚开始)                  │
+    │  [s0, s1, s2, _, _, _, ...]                          │
+    │                                                     │
+    │  step=99999 num_samples=99999 (快满了)               │
+    │  [s0, s1, s2, ..., s99999, _]                        │
+    │                                                     │
+    │  step=2     num_samples=100000 (满了, 循环)          │
+    │  [s100000, s100001, s2, s3, ...] ← 覆盖最老的       │
+    └─────────────────────────────────────────────────────┘
+"""
 
 class ReplayBuffer:
     """Fixed-size buffer to store experience tuples."""
@@ -64,7 +89,7 @@ class ReplayBuffer:
 
     def feed_forward_generator(self, num_mini_batch, mini_batch_size):
         for _ in range(num_mini_batch):
-            sample_idxs = np.random.choice(self.num_samples, size=mini_batch_size)
+            sample_idxs = np.random.choice(self.num_samples, size=mini_batch_size)  # 随机采样 mini_batch_size 个索引，索引最大值为 self.num_samples-1
             yield (
                 self.states[sample_idxs].to(self.device),
                 self.next_states[sample_idxs].to(self.device),

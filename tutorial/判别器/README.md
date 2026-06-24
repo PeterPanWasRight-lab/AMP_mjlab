@@ -1,32 +1,39 @@
 # AMP 判别器原理可视化
 
-本目录包含**三个**交互式网页，把 AMP 判别器的数学原理、训练动力学、和数学框架展示出来。
+本目录包含**五个**文档，把 AMP 判别器的数学原理、训练动力学、数学框架和代码数据结构展示出来。
 
 ## 文件
 
-| 文件 | 内容 |
-|---|---|
-| `index.html` | 判别器原理总览（9 节）：D 是什么、训练损失、风格奖励、准确率影响、对抗平衡、数据流、公式、概念澄清、总结 |
-| `two_questions.html` | 两个核心问题解答：① D 太强为何奖励 ≈ 0 ② 为什么不换更好的奖励 |
-| `math_framework.html` | **新** AMP 数学框架：min-max 博弈、Nash 平衡、收敛的数学定义、四股力量、交互式模拟 |
+| 文件 | 类型 | 内容 |
+|---|---|---|
+| `index.html` | 网页 | 判别器原理总览（9 节）：D 是什么、训练损失、风格奖励、准确率影响、对抗平衡、数据流、公式、概念澄清、总结 |
+| `two_questions.html` | 网页 | 两个核心问题解答：① D 太强为何奖励 ≈ 0 ② 为什么不换更好的奖励 |
+| `math_framework.html` | 网页 | **新** AMP 数学框架：min-max 博弈、Nash 平衡、收敛的数学定义、四股力量、交互式模拟 |
+| `replay_buffer.html` | 网页 | ReplayBuffer 完整可视化：环形缓冲区 insert、feed_forward_generator 采样、代码逐行注释 |
+| `d_too_strong_proof.md` | 文档 | D 太强 → G 学不到的严格数学推导（含 $\epsilon$ 形式化证明）|
 
 ## 打开方式
 
 ```bash
-# macOS
+# macOS - 网页
 open tutorial/判别器/index.html
 open tutorial/判别器/two_questions.html
 open tutorial/判别器/math_framework.html
+open tutorial/判别器/replay_buffer.html
 ```
 
-## 三个网页的层次
+## 五个文档的层次
 
 ```
-index.html         (入门：判别器是什么)
+index.html             (入门：判别器是什么)
      ↓
-two_questions.html (问题：D 太强 / 不换更好奖励)
+two_questions.html     (问题：D 太强 / 不换更好奖励)
      ↓
-math_framework.html (理论：min-max 博弈 + Nash 平衡)
+math_framework.html    (理论：min-max 博弈 + Nash 平衡)
+     ↓
+d_too_strong_proof.md  (深入：D 太强梯度消失的数学证明)
+     ↓
+replay_buffer.html     (代码：ReplayBuffer 数据结构的完整可视化)
 ```
 
 ## math_framework.html 的 8 节内容

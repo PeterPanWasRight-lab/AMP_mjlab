@@ -31,17 +31,30 @@ from rsl_rl.utils import string_to_callable
 
 
 class AMPPPO:
-    """Proximal Policy Optimization algorithm (https://arxiv.org/abs/1707.06347)."""
+    """Proximal Policy Optimization 算法（https://arxiv.org/abs/1707.06347）。
+
+    在标准 PPO 基础上集成了 Adversarial Motion Priors (AMP) 风格奖励塑形。
+    通过判别器提供"风格奖励"拉近策略与专家行为。
+
+    Attributes:
+        policy: actor-critic 模块，待优化参数。
+        discriminator: AMP 判别器，对 (s, s') 转移打分。
+        amp_data: 专家 (s, s') 转移数据源（正样本）。
+        amp_normalizer: AMP 状态的均值/方差归一化器。
+        amp_storage: 策略最近 (s, s') 的回放池（负样本）。
+        storage: PPO rollout 存储，存 (obs, action, reward, done, value, log_prob)，
+            由 ``act`` / ``process_env_step`` 写入。
+    """
 
     policy: ActorCritic
-    """The actor critic module."""
+    """actor-critic 模块。"""
 
     def __init__(
         self,
-        policy,
-        discriminator,
-        amp_data,
-        amp_normalizer,
+        policy,             # ActorCritic 实例，包含 actor / critic 两个 MLP
+        discriminator,      # Discriminator 实例，包含 trunk / amp_linear
+        amp_data,           # 专家数据源（ReplayBuffer / MotionLoader）
+        amp_normalizer,     # AMP 状态归一化器（可 None）
         amp_replay_buffer_size=100000,
         min_std=None,
         num_learning_epochs=1,
@@ -59,14 +72,55 @@ class AMPPPO:
         device="cpu",
         normalize_advantage_per_mini_batch=False,
         optimizer: str = "adam",
-        # RND parameters
+        # RND 参数
         rnd_cfg: dict | None = None,
-        # Symmetry parameters
+        # Symmetry 参数
         symmetry_cfg: dict | None = None,
-        # Distributed training parameters
+        # 多 GPU 训练参数
         multi_gpu_cfg: dict | None = None,
         share_cnn_encoders=False,
     ):
+        """初始化 AMP-PPO 算法。
+
+        完成以下工作：
+        1. 设置 device（CPU / GPU）和多 GPU 训练配置。
+        2. 初始化可选模块：RND（探索增强）、Symmetry（对称性增强）。
+        3. 初始化 AMP 组件：判别器、专家数据、策略 replay buffer、归一化器。
+        4. 构建优化器（同时优化 policy + discriminator.trunk + discriminator.amp_linear，
+           对后两者应用不同 L2 正则）。
+        5. 保存 PPO 超参数（clip、gamma、lambda 等）。
+
+        Args:
+            policy: actor-critic 模块（如 ActorCritic）。其参数（actor MLP + critic MLP）
+                由 PPO 优化。
+            discriminator: AMP 判别器。包含 trunk（特征提取 MLP）和 amp_linear
+                （最终分类头）。
+            amp_data: 专家转移数据源。必须提供
+                ``feed_forward_generator(num_mini_batches, mini_batch_size)``，
+                输出形状 ``(N, amp_dim)``，其中 ``amp_dim = 2 * num_amp_obs``。
+            amp_normalizer: 判别器前向之前对 AMP 状态做归一化，可为 ``None``。
+            amp_replay_buffer_size: ``amp_storage`` 的最大容量（FIFO），默认 100,000。
+            min_std: 更新后对策略 std 的下界裁剪（数值安全），可为 None。
+            num_learning_epochs: 每次 ``update()`` 内的训练 epoch 数。
+            num_mini_batches: 每个 epoch 把 rollout 切成多少个 mini-batch。
+            clip_param: PPO 截断系数（surrogate objective 的 epsilon）。
+            gamma: 折扣因子。
+            lam: GAE 的 lambda。
+            value_loss_coef: value loss 权重。
+            entropy_coef: 策略熵正则权重。
+            learning_rate: Adam 优化器学习率。
+            max_grad_norm: PPO 梯度的最大范数（裁剪）。
+            use_clipped_value_loss: True 用截断版 value loss，否则用 MSE。
+            schedule: ``"fixed"``（固定 lr）或 ``"adaptive"``（基于 KL 自适应 lr）。
+            desired_kl: 自适应 lr 调度的目标 KL 散度。
+            device: PyTorch device，如 ``"cpu"``、``"cuda:0"``。
+            normalize_advantage_per_mini_batch: 是否在每个 mini-batch 内归一化 advantage。
+            optimizer: 优化器名，目前仅支持 ``"adam"``。
+            rnd_cfg: 可选 RND 配置。若提供，RND 内在奖励会加到外部奖励。
+            symmetry_cfg: 可选 Symmetry 配置。若提供，会用镜像数据增强 / 镜像 loss。
+            multi_gpu_cfg: 可选多 GPU 配置。若提供，会装分布式 all-reduce 钩子。
+            share_cnn_encoders: 预留位，AMPPPO 暂未使用。
+        """
         # device-related parameters
         self.device = device
         self.is_multi_gpu = multi_gpu_cfg is not None
@@ -152,6 +206,24 @@ class AMPPPO:
     def init_storage(
         self, training_type, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, actions_shape
     ):
+        """分配 PPO rollout 存储。
+
+        创建 ``self.storage``（``RolloutStorage``），大小为
+        ``num_envs * num_transitions_per_env``，用于存并行收集的转移。
+        若启用了 RND，也会预留 RND 状态空间。
+
+        Args:
+            training_type: ``"rl"``（PPO / AMP-PPO）或 ``"distillation"``（蒸馏）。
+            num_envs: 并行环境数 E。
+            num_transitions_per_env: 每个环境每次 rollout 采样的步数 T。
+            actor_obs_shape: 单条 actor 观测的形状，如 ``[num_actor_obs]``。
+            critic_obs_shape: 单条 critic 观测的形状，如 ``[num_critic_obs]``。
+            actions_shape: 单条动作的形状，如 ``[num_actions]``。
+
+        Note:
+            ``self.amp_storage`` 在 ``__init__`` 中已经分配（不依赖这些维度）；
+            这里只创建 ``self.storage``。
+        """
         # create memory for RND as well :)
         if self.rnd:
             rnd_state_shape = [self.rnd.num_states]
@@ -162,14 +234,30 @@ class AMPPPO:
             training_type,
             num_envs,
             num_transitions_per_env,
-            actor_obs_shape,
-            critic_obs_shape,
-            actions_shape,
+            actor_obs_shape,   # actor观测维度
+            critic_obs_shape,  # critic观测维度
+            actions_shape,     # 动作输出维度
             rnd_state_shape,
             self.device,
         )
 
     def act(self, obs, critic_obs, amp_obs):
+        """用当前策略采样动作并暂存 transition。
+
+        调用 actor 采样动作、critic 估计 value，并暂存后续 ``process_env_step``
+        需要的字段。**当前时刻**的 ``amp_obs`` 存到 ``self.amp_transition``，
+        下一时刻的 ``amp_obs`` 会在 ``process_env_step`` 里和它配对，形成
+        ``(s, s')`` 供 AMP 训练使用。
+
+        Args:
+            obs: actor 观测张量，形状 ``(E, num_actor_obs)``，输入 actor MLP。
+            critic_obs: critic 观测张量，形状 ``(E, num_critic_obs)``，输入 critic MLP。
+            amp_obs: AMP 观测张量，形状 ``(E, num_amp_obs)``。
+                与 ``obs`` 描述同一时刻，但用判别器所需的 body-frame 格式。
+
+        Returns:
+            采样得到的动作张量，形状 ``(E, num_actions)``，已 detach（不参与梯度计算）。
+        """
         if self.policy.is_recurrent:
             self.transition.hidden_states = self.policy.get_hidden_states()
         # compute the actions and values
@@ -185,6 +273,23 @@ class AMPPPO:
         return self.transition.actions
 
     def process_env_step(self, rewards, dones, infos, amp_obs):
+        """处理一个环境步的反馈，完成当前 transition。
+
+        完成以下工作：
+        1. 把外部奖励（通常已含 style_reward）记到 transition。
+        2. 若启用了 RND，把内在好奇心奖励加到外部奖励。
+        3. 处理 timeout（环境超时但不算 done），加 bootstrap 价值。
+        4. 把 ``(prev_amp_obs, curr_amp_obs)`` 插入 ``amp_storage``（判别器负样本）。
+        5. 把 transition 加入 ``self.storage`` 并清空，准备下一个 step。
+        6. 重置循环策略的 hidden state（若适用）。
+
+        Args:
+            rewards: 环境返回的外部奖励，形状 ``(E, 1)``，通常 task_reward + style_reward。
+            dones: 环境返回的 done 标志，形状 ``(E,)``，包括 timeout 和真正终止。
+            infos: 环境 info 字典。若启用 RND，需要含 ``"observations"["rnd_state"]``。
+            amp_obs: **当前时刻**的 AMP 观测，形状 ``(E, num_amp_obs)``。
+                与 ``act()`` 时存的 ``prev_amp_obs`` 配对形成 ``(s, s')``。
+        """
         # Record the rewards and dones
         # Note: we clone here because later on we bootstrap the rewards based on timeouts
         self.transition.rewards = rewards.clone()
@@ -216,6 +321,15 @@ class AMPPPO:
         self.policy.reset(dones)
 
     def compute_returns(self, last_critic_obs):
+        """用 GAE 计算每个时间步的 return 和 advantage。
+
+        用 critic 估计最后一个时间步的 V(s)，然后反向 GAE 计算所有时间步
+        的 advantage 和 return，写入 ``self.storage``。
+
+        Args:
+            last_critic_obs: 最后一个时间步的 critic 观测，形状
+                ``(E, num_critic_obs)``。对应 rollout 边界处的 V(s_T)。
+        """
         # compute value for the last step
         last_values = self.policy.evaluate(last_critic_obs).detach()
         self.storage.compute_returns(
@@ -223,6 +337,42 @@ class AMPPPO:
         )
 
     def update(self):  # noqa: C901
+        """核心训练循环：同时更新 PPO 策略和 AMP 判别器。
+
+        流程：
+        1. 构造三路数据生成器并同步迭代：
+           - ``generator``: PPO rollout 的 mini-batch（来自 ``self.storage``）
+           - ``amp_policy_generator``: 策略最近 (s, s') 转移（来自 ``self.amp_storage``）
+           - ``amp_expert_generator``: 专家 (s, s') 转移（来自 ``self.amp_data``）
+        2. 对每个 mini-batch：
+           a) 重新用当前 policy 算 log_prob、entropy、value
+           b) 算 PPO 三件套：surrogate loss、value loss、entropy
+           c) 算 AMP 判别器损失：expert_loss / policy_loss / grad_pen_loss
+           d) loss = PPO_loss + AMP_loss，一次 ``backward()`` 同时更新 policy 和判别器
+        3. 用当前 batch 的 policy / expert 状态更新 ``amp_normalizer`` 的 running stats
+        4. 累积每个 mini-batch 的统计量（用于 TensorBoard 日志）
+
+        维度约定（设 N = mini-batch size, E = num_envs, T = num_transitions_per_env）：
+        - ``obs_batch``: ``(N, num_actor_obs)``
+        - ``critic_obs_batch``: ``(N, num_critic_obs)``
+        - ``actions_batch``: ``(N, num_actions)``
+        - ``target_values_batch`` / ``returns_batch`` / ``advantages_batch``: ``(N, 1)``
+        - ``sample_amp_policy`` / ``sample_amp_expert``:
+          ``((N, num_amp_obs), (N, num_amp_obs))``，对应 ``(s, s')``
+        - ``policy_d`` / ``expert_d``: ``(N, 1)``
+
+        Returns:
+            loss_dict: dict，包含本轮平均的损失值，用于 TensorBoard 日志：
+                - ``value_function``: value loss 均值
+                - ``surrogate``: PPO surrogate loss 均值
+                - ``entropy``: 策略熵均值
+                - ``amp``: AMP LSGAN 损失均值
+                - ``amp_grad_pen``: 梯度惩罚均值
+                - ``amp_policy_pred``: ``policy_d.mean()``，健康训练应向 +1 翻转
+                - ``amp_expert_pred``: ``expert_d.mean()``，应接近 +1
+                - ``skipped_non_finite_batches``: 因 NaN/Inf 跳过的 batch 数
+                - 可选 ``rnd``、``symmetry``
+        """
         mean_value_loss = 0
         mean_surrogate_loss = 0
         mean_entropy = 0
@@ -555,7 +705,11 @@ class AMPPPO:
     """
 
     def broadcast_parameters(self):
-        """Broadcast model parameters to all GPUs."""
+        """把 rank 0 的模型参数广播到所有 GPU（多 GPU 训练用）。
+
+        把当前进程（rank 0）的 policy 和（若有）RND predictor 的 state_dict
+        广播给所有 GPU，确保所有 rank 拥有相同参数后再开始训练。
+        """
         # obtain the model parameters on current GPU
         model_params = [self.policy.state_dict()]
         if self.rnd:
@@ -568,11 +722,28 @@ class AMPPPO:
             self.rnd.predictor.load_state_dict(model_params[1])
 
     def get_policy(self):
-        """Return the policy module."""
+        """返回策略模块。
+
+        Returns:
+            ``self.policy``（ActorCritic 实例），供部署/导出时使用。
+        """
         return self.policy
 
     def save(self) -> dict:
-        """Serialize algorithm state for checkpointing (v5 format)."""
+        """序列化算法状态用于 checkpoint（v5 格式）。
+
+        将 actor MLP 权重重命名为 ``"mlp.*"``、critic 同理、std 参数重命名为
+        ``"distribution.std_param"``，使 checkpoint 兼容统一格式。
+        同时保存判别器、optimizer、AMP 归一化器状态。
+
+        Returns:
+            dict，键包括：
+                - ``actor_state_dict``: actor MLP 权重
+                - ``critic_state_dict``: critic MLP 权重
+                - ``optimizer_state_dict``: Adam optimizer 状态
+                - ``discriminator_state_dict``: 判别器权重（trunk + amp_linear）
+                - ``amp_normalizer``: AMP 归一化器状态
+        """
         sd = self.policy.state_dict()
         actor_sd, critic_sd = {}, {}
         for k, v in sd.items():
@@ -592,9 +763,20 @@ class AMPPPO:
         return result
 
     def load(self, loaded_dict: dict, load_cfg: dict | None = None, strict: bool = True) -> bool:
-        """Load algorithm state from a checkpoint dict (v5 format).
+        """从 checkpoint 字典加载算法状态（v5 格式）。
 
-        Returns True if training should be considered resumed (i.e. all parts loaded).
+        支持选择性地加载 actor / critic，例如只想部署 actor 可以只传
+        ``load_cfg={"actor": True, "critic": False}``。判别器和 AMP 归一化器
+        若 checkpoint 中存在则一并加载。
+
+        Args:
+            loaded_dict: 由 ``save()`` 产生的 checkpoint 字典。
+            load_cfg: 可选，键 ``"actor"``（默认 True）和 ``"critic"``
+                （默认与 ``actor`` 一致）控制是否加载对应部分。
+            strict: 是否严格匹配 state_dict 的 key。
+
+        Returns:
+            True 表示 actor 和 critic 都成功加载（视为恢复训练），否则 False。
         """
         load_cfg = load_cfg or {}
         load_actor = load_cfg.get("actor", True)
@@ -633,9 +815,11 @@ class AMPPPO:
         return load_actor and load_critic
 
     def reduce_parameters(self):
-        """Collect gradients from all GPUs and average them.
+        """收集所有 GPU 的梯度并取平均（多 GPU 训练用）。
 
-        This function is called after the backward pass to synchronize the gradients across all GPUs.
+        在 ``loss.backward()`` 之后调用，把所有 rank 的 policy（和 RND）
+        梯度 ``all_reduce`` 求平均，再写回各 rank 的 ``param.grad``，
+        保证后续 ``optimizer.step()`` 在每个 rank 上用一致梯度更新。
         """
         # Create a tensor to store the gradients
         grads = [param.grad.view(-1) for param in self.policy.parameters() if param.grad is not None]

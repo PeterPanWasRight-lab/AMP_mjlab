@@ -290,6 +290,54 @@
 <tr><td>$\text{Var}(\theta_t)$</td><td>有界震荡</td><td><span class="danger">持续增大</span></td><td>参数稳定性</td></tr>
 </table>
 
+<h3>6.1b TensorBoard 中的实际日志</h3>
+
+<p>代码 <code>rsl_rl/algorithms/amp_ppo.py:446-447</code> 定义了 D 的训练目标：</p>
+
+<pre><code>expert_loss = MSE(expert_d, +1)   # D 看到 expert → 应该输出 +1
+policy_loss = MSE(policy_d, -1)   # D 看到 G1    → 应该输出 -1</code></pre>
+
+<p>所以 D 的训练目标是一正一负：<span class="highlight">expert 目标是 +1，policy 目标是 -1</span>。</p>
+
+<p>代码 <code>rsl_rl/algorithms/amp_ppo.py:536-549</code> 把这些指标都写入 TensorBoard：</p>
+
+<pre><code>loss_dict = {
+    "value_function": mean_value_loss,    # Critic loss
+    "surrogate": mean_surrogate_loss,      # Actor PPO loss
+    "entropy": mean_entropy,               # 策略熵
+    "amp": mean_amp_loss,                  # 判别器总 loss
+    "amp_grad_pen": mean_grad_pen_loss,    # 梯度惩罚
+    "amp_policy_pred": mean_policy_pred,   # ← d_policy (目标 -1)
+    "amp_expert_pred": mean_expert_pred,   # ← d_expert (目标 +1)
+    ...
+}</code></pre>
+
+<p>启动训练后跑 <code>tensorboard --logdir logs</code>，在 SCALARS 标签下能看到：</p>
+
+<table>
+<tr><th>TensorBoard 指标</th><th>D 训练目标</th><th>健康曲线</th><th>数值范围</th></tr>
+<tr><td><code>amp_expert_pred</code></td><td>+1</td><td>从 +0.5 升到 +0.9</td><td>[-1, +1]</td></tr>
+<tr><td><code>amp_policy_pred</code></td><td>-1</td><td>从 -0.5 升到 +0.7</td><td>[-1, +1]</td></tr>
+<tr><td><code>amp</code></td><td>—</td><td>从 0.4 降到 0.1</td><td>[0, +∞)</td></tr>
+<tr><td><code>amp_grad_pen</code></td><td>—</td><td>有界</td><td>[0, +∞)</td></tr>
+</table>
+
+<p><span class="highlight">关键观察</span>：健康训练时：</p>
+<ul>
+  <li><code>amp_expert_pred</code> 趋向 +1（D 一直能识别真专家）</li>
+  <li><code>amp_policy_pred</code> 从负数（如 -0.5）<strong>翻转为正数</strong>（如 +0.7）——G1 风格"骗过"D</li>
+  <li>两条线最终都接近 +1，但 <code>amp_expert_pred</code> 略高（因为 expert 是"标准答案"）</li>
+</ul>
+
+<p><span class="danger">危险信号</span>：</p>
+<table>
+<tr><th>情况</th><th>amp_expert_pred</th><th>amp_policy_pred</th><th>诊断</th></tr>
+<tr><td>健康</td><td>+0.85</td><td>+0.7</td><td>✅ G1 像人</td></tr>
+<tr><td>D 支配</td><td>+0.95</td><td>-0.95</td><td>❌ G1 一直像机器人</td></tr>
+<tr><td>D 退化</td><td>-0.5</td><td>-0.5</td><td>❌ D 自己也分不清</td></tr>
+<tr><td>G 卡住</td><td>+0.85</td><td>-0.3（不动）</td><td>❌ G1 学不会</td></tr>
+</table>
+
 <h3>6.2 各种失败模式的诊断</h3>
 
 <div class="formula-block">
