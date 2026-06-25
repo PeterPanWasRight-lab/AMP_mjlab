@@ -39,8 +39,22 @@ from rsl_rl.modules import (
 from rsl_rl.utils import AMPLoader, Normalizer, store_code_state
 
 
+# 本 runner 里常用的维度符号：
+# E = 并行环境数量（env.num_envs）
+# T = 每个环境一次 rollout 采样步数（num_steps_per_env）
+# A = 动作维度（env.num_actions，例如 29）
+# Oa = actor/policy 观测维度（num_obs）
+# Oc = critic/privileged 观测维度（num_privileged_obs）
+# Oamp = AMP 判别器单帧观测维度（amp_data.observation_dim）
+
+
 def _migrate_train_cfg(train_cfg: dict) -> None:
-    """Convert mjlab v5 actor/critic config format to legacy policy format."""
+    """把 mjlab v5 的 actor/critic 配置迁移成旧版 policy 配置。
+
+    输入 ``train_cfg`` 是训练配置字典，会被原地修改：
+        - 新格式可能有 ``actor`` / ``critic`` 两块。
+        - 旧格式期望有 ``policy``，其中包含 ActorCritic 的隐藏层、激活函数、噪声配置等。
+    """
     if "policy" not in train_cfg and "actor" in train_cfg:
         actor_cfg = train_cfg.pop("actor")
         critic_cfg = train_cfg.pop("critic", {})
@@ -63,7 +77,17 @@ def _migrate_train_cfg(train_cfg: dict) -> None:
 
 
 def _unpack_obs(result):
-    """Adapt TensorDict observations to the legacy ``(obs, extras)`` format."""
+    """把环境 reset/get_observations 输出统一成旧版 ``(obs, extras)`` 格式。
+
+    可能输入：
+        - 旧版：``(obs, extras)``，其中 ``obs`` 是 ``(E, Oa)``。
+        - TensorDict 风格：``obs`` 本身有 key，例如 ``actor`` / ``policy`` / ``critic`` / ``amp``。
+
+    返回：
+        - ``plain_obs``: actor 使用的观测，形状 ``(E, Oa)``。
+        - ``extras["observations"]``: 其他观测字典，例如：
+          ``critic: (E, Oc)``, ``amp: (E, Oamp)``, ``rnd_state: (E, Ornd)``。
+    """
     if isinstance(result, tuple):
         obs, extras = result
     else:
@@ -80,7 +104,14 @@ def _unpack_obs(result):
 
 
 def _unpack_step(obs, rew, dones, infos):
-    """Adapt TensorDict step output to the legacy format."""
+    """把环境 step 输出统一成旧版 ``(obs, rew, dones, infos)`` 格式。
+
+    结构约定：
+        - ``obs``: actor 下一步观测，形状 ``(E, Oa)``。
+        - ``rew``: 环境即时奖励，形状常见为 ``(E,)`` 或 ``(E, 1)``。
+        - ``dones``: 每个环境是否结束，形状 ``(E,)``。
+        - ``infos["observations"]``: 额外观测字典，例如 ``critic`` / ``amp``。
+    """
     if hasattr(obs, "keys"):
         actor_key = "actor" if "actor" in obs.keys() else "policy"
         plain_obs = obs[actor_key]
@@ -93,9 +124,27 @@ def _unpack_step(obs, rew, dones, infos):
 
 
 class AmpOnPolicyRunner:
-    """On-policy runner for training and evaluation."""
+    """AMP-PPO 的 on-policy 训练总控。
+
+    Runner 负责把几个模块串起来：
+        1. 从环境拿观测，整理 actor/critic/AMP 所需的不同观测。
+        2. 创建 policy、discriminator、AMP expert loader 和 AMPPPO 算法对象。
+        3. 循环执行 rollout：policy 采样动作 -> env.step -> AMP 奖励塑形 -> 写入 storage。
+        4. 调用 ``self.alg.update()`` 做 PPO + AMP 判别器更新。
+
+    初学者可以把它看成“训练外壳”：具体 loss 在 ``AMPPPO``，网络在 ``modules``，
+    这里主要处理数据流、日志、保存/加载。
+    """
 
     def __init__(self, env: VecEnv, train_cfg: dict, log_dir: str | None = None, device="cpu"):
+        """初始化 runner、网络、AMP 数据和算法对象。
+
+        Args:
+            env: 向量化环境，关键属性包括 ``num_envs=E``、``num_actions=A``。
+            train_cfg: 训练配置字典，包含 ``policy``、``algorithm``、AMP motion 配置等。
+            log_dir: 日志和 checkpoint 输出目录；为 None 时不写日志。
+            device: 训练设备，例如 ``"cpu"`` 或 ``"cuda:0"``。
+        """
         _migrate_train_cfg(train_cfg)
         self.cfg = train_cfg
         self.alg_cfg = train_cfg["algorithm"]
@@ -115,7 +164,9 @@ class AmpOnPolicyRunner:
             raise ValueError(f"Training type not found for algorithm {self.alg_cfg['class_name']}.")
 
         # resolve dimensions of observations
+        # obs: (E, Oa)，extras["observations"] 里可能包含 critic/amp/rnd_state 等。
         obs, extras = _unpack_obs(self.env.get_observations())
+        # num_obs = Oa，actor 输入维度。
         num_obs = obs.shape[1]
 
         # resolve type of privileged observations
@@ -132,11 +183,17 @@ class AmpOnPolicyRunner:
 
         # resolve dimensions of privileged observations
         if self.privileged_obs_type is not None:
+            # num_privileged_obs = Oc，critic 或 teacher 输入维度。
             num_privileged_obs = extras["observations"][self.privileged_obs_type].shape[1]
         else:
+            # 没有额外 critic 观测时，critic 和 actor 共用 obs，Oc = Oa。
             num_privileged_obs = num_obs
 
         # evaluate the policy class
+        # policy 输入：
+        #   actor obs 维度 Oa
+        #   critic/teacher obs 维度 Oc
+        #   action 维度 A
         policy_class = eval(self.policy_cfg.pop("class_name"))
         policy: ActorCritic | ActorCriticRecurrent | StudentTeacher | StudentTeacherRecurrent = policy_class(
             num_obs, num_privileged_obs, self.env.num_actions, **self.policy_cfg
@@ -149,6 +206,7 @@ class AmpOnPolicyRunner:
             if rnd_state is None:
                 raise ValueError("Observations for the key 'rnd_state' not found in infos['observations'].")
             # get dimension of rnd gated state
+            # rnd_state: (E, Ornd)，Ornd 是 RND 输入状态维度。
             num_rnd_state = rnd_state.shape[1]
             # add rnd gated state to config
             self.alg_cfg["rnd_cfg"]["num_states"] = num_rnd_state
@@ -164,6 +222,8 @@ class AmpOnPolicyRunner:
         # Resolve all body names from the environment's robot entity
         robot_entity = self.env.unwrapped.scene["robot"]
         all_body_names = robot_entity.body_names
+        # amp_data 从专家 motion 文件中采样 AMP 状态转移。
+        # 每个 AMP 单帧状态维度为 Oamp = amp_data.observation_dim。
         amp_data = AMPLoader(
             motion_file=train_cfg["amp_motion_files"],
             body_names=train_cfg["amp_body_names"],
@@ -171,7 +231,10 @@ class AmpOnPolicyRunner:
             all_body_names=all_body_names,
             device=self.device,
         )
+        # amp_normalizer 维护 AMP 状态的 running mean/std，输入单帧形状为 (Oamp,)。
         amp_normalizer = Normalizer(amp_data.observation_dim)
+        # discriminator 输入 concat([amp_obs_t, amp_obs_t+1])，维度为 2 * Oamp；
+        # 输出通常是 (B, 1)，表示该转移像专家还是像策略。
         discriminator = Discriminator(
             amp_data.observation_dim * 2,
             train_cfg["amp_reward_coef"],
@@ -179,6 +242,7 @@ class AmpOnPolicyRunner:
             device,
             train_cfg["amp_task_reward_lerp"],
         ).to(self.device)
+        # min_normalized_std 是每个动作维度探索 std 的下界。最终会整理成长度 A 的向量。
         min_std_values = list(train_cfg["min_normalized_std"])
         num_actions = self.env.num_actions
         if len(min_std_values) == 0:
@@ -203,6 +267,7 @@ class AmpOnPolicyRunner:
         min_std = torch.tensor(min_std_values, device=self.device, requires_grad=False)
 
         # initialize algorithm
+        # self.alg 持有 policy/discriminator/AMP buffer/PPO storage，并负责真正的 loss 计算和反向传播。
         alg_class = eval(self.alg_cfg.pop("class_name"))
         self.alg: AMPPPO = alg_class(
             policy,
@@ -220,7 +285,9 @@ class AmpOnPolicyRunner:
         self.save_interval = self.cfg["save_interval"]
         self.empirical_normalization = self.cfg["empirical_normalization"]
         if self.empirical_normalization:
+            # obs_normalizer: 输入/输出 (E, Oa) 或 (N, Oa)，内部 mean/std 为 (1, Oa)。
             self.obs_normalizer = EmpiricalNormalization(shape=[num_obs], until=1.0e8).to(self.device)
+            # privileged_obs_normalizer: 输入/输出 (E, Oc) 或 (N, Oc)。
             self.privileged_obs_normalizer = EmpiricalNormalization(shape=[num_privileged_obs], until=1.0e8).to(
                 self.device
             )
@@ -229,6 +296,11 @@ class AmpOnPolicyRunner:
             self.privileged_obs_normalizer = torch.nn.Identity().to(self.device)  # no normalization
 
         # init storage and model
+        # RolloutStorage 会保存 T 步、E 个环境的数据：
+        #   observations: (T, E, Oa)
+        #   privileged_observations: (T, E, Oc)
+        #   actions: (T, E, A)
+        #   rewards/dones/values/log_probs 等，update 时展平成 mini-batch。
         self.alg.init_storage(
             self.training_type,
             self.env.num_envs,
@@ -250,6 +322,22 @@ class AmpOnPolicyRunner:
         self.git_status_repos = [rsl_rl.__file__]
 
     def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False):  # noqa: C901
+        """执行主训练循环。
+
+        Args:
+            num_learning_iterations: 训练迭代次数。每次迭代都会收集 ``T`` 步 rollout，
+                然后调用一次 ``self.alg.update()``。
+            init_at_random_ep_len: 是否随机初始化每个环境的 episode_length，
+                用于打散早期探索时所有环境同步 reset 的情况。
+
+        主要张量结构：
+            - ``obs``: ``(E, Oa)``，actor 当前观测。
+            - ``privileged_obs``: ``(E, Oc)``，critic 当前观测。
+            - ``amp_obs``: ``(E, Oamp)``，AMP 当前帧状态。
+            - ``actions``: ``(E, A)``，当前策略采样的动作。
+            - ``rewards``: ``(E,)`` 或 ``(E, 1)``，经过 AMP 判别器塑形后的奖励。
+            - ``dones``: ``(E,)``，环境结束标志。
+        """
         # initialize writer
         if self.log_dir is not None and self.writer is None and not self.disable_logs:
             # Launch either Tensorboard or Neptune & Tensorboard summary writer(s), default: Tensorboard.
@@ -284,16 +372,20 @@ class AmpOnPolicyRunner:
             )
 
         # start learning
+        # 初始观测。obs 给 actor；privileged_obs 给 critic；amp_obs 给 AMP 判别器构造 (s, s')。
         obs, extras = _unpack_obs(self.env.get_observations())
         privileged_obs = extras["observations"].get(self.privileged_obs_type, obs)
         amp_obs = extras["observations"]["amp"]
+        # obs: (E, Oa), privileged_obs: (E, Oc), amp_obs: (E, Oamp)。
         obs, privileged_obs, amp_obs = obs.to(self.device), privileged_obs.to(self.device), amp_obs.to(self.device)
         self.train_mode()  # switch to train mode (for dropout for example)
 
         # Book keeping
         ep_infos = []
+        # rewbuffer/lenbuffer 只存最近 100 个已完成 episode 的统计，用于日志。
         rewbuffer = deque(maxlen=100)
         lenbuffer = deque(maxlen=100)
+        # cur_reward_sum/cur_episode_length: (E,)，每个并行环境各自累计当前 episode 的奖励和长度。
         cur_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
         cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
 
@@ -301,6 +393,7 @@ class AmpOnPolicyRunner:
         if self.alg.rnd:
             erewbuffer = deque(maxlen=100)
             irewbuffer = deque(maxlen=100)
+            # RND 日志专用：外在奖励、内在奖励分别按环境累计，形状都是 (E,)。
             cur_ereward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
             cur_ireward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
 
@@ -320,11 +413,15 @@ class AmpOnPolicyRunner:
             with torch.inference_mode():
                 for _ in range(self.num_steps_per_env):
                     # Sample actions
+                    # actions: (E, A)。同时 alg 内部会暂存 obs/value/log_prob/amp_obs，等待 env.step 结果补齐 transition。
                     actions = self.alg.act(obs, privileged_obs, amp_obs)
                     # Step the environment
+                    # env.step 返回下一时刻观测、环境原始奖励、done、info。
                     obs, rewards, dones, infos = _unpack_step(*self.env.step(actions.to(self.env.device)))
+                    # next_amp_obs: (E, Oamp)，下一帧 AMP 状态，用来和 amp_obs 组成 AMP 转移。
                     next_amp_obs = infos["observations"]["amp"]
                     # Move to device
+                    # obs: (E, Oa), rewards: (E,) 或 (E,1), dones: (E,), next_amp_obs: (E, Oamp)。
                     obs, rewards, dones, next_amp_obs = (
                         obs.to(self.device),
                         rewards.to(self.device),
@@ -332,8 +429,10 @@ class AmpOnPolicyRunner:
                         next_amp_obs.to(self.device),
                     )
                     # perform normalization
+                    # obs_normalizer 不改变形状，仍是 (E, Oa)。
                     obs = self.obs_normalizer(obs)
                     if self.privileged_obs_type is not None:
+                        # privileged_obs: (E, Oc)，给 critic 估计 V(s) 使用。
                         privileged_obs = self.privileged_obs_normalizer(
                             infos["observations"][self.privileged_obs_type].to(self.device)
                         )
@@ -344,18 +443,28 @@ class AmpOnPolicyRunner:
                     # mjlab auto-resets before computing obs, so post-reset amp obs
                     # belong to the new episode. Use pre-step amp_obs as the best
                     # approximation of the terminal amp observation.
+                    # next_amp_obs_with_term 默认等于 next_amp_obs；对 done 的环境，用旧 amp_obs 近似终止帧，
+                    # 避免把 reset 后新 episode 的第一帧误当成上一条 AMP 转移的 s'。
                     next_amp_obs_with_term = torch.clone(next_amp_obs)
                     reset_env_ids = (dones > 0).nonzero(as_tuple=False).flatten()
                     if len(reset_env_ids) > 0:
                         next_amp_obs_with_term[reset_env_ids] = amp_obs[reset_env_ids]
 
+                    # predict_amp_reward 输入：
+                    #   amp_obs: (E, Oamp)，当前帧 s
+                    #   next_amp_obs_with_term: (E, Oamp)，下一帧 s'
+                    #   rewards: 环境原始 task reward，(E,) 或 (E,1)
+                    # 输出 rewards 是 task/style 混合后的奖励，形状与原 rewards 对齐。
                     rewards = self.alg.discriminator.predict_amp_reward(
                         amp_obs, next_amp_obs_with_term, rewards, normalizer=self.alg.amp_normalizer
                     )[0]
+                    # 下一轮 rollout 的当前 AMP 状态更新为环境返回的 next_amp_obs。
                     amp_obs = torch.clone(next_amp_obs)
+                    # 把本步数据写入 PPO storage 和 AMP replay buffer。
                     self.alg.process_env_step(rewards, dones, infos, next_amp_obs_with_term)
 
                     # Extract intrinsic rewards (only for logging)
+                    # intrinsic_rewards: 若启用 RND，形状通常与 rewards 一致；这里只用于日志。
                     intrinsic_rewards = self.alg.intrinsic_rewards if self.alg.rnd else None
 
                     # book keeping
@@ -375,6 +484,7 @@ class AmpOnPolicyRunner:
                         cur_episode_length += 1
                         # Clear data for completed episodes
                         # -- common
+                        # new_ids: (K, 1)，K 是本 step 中结束的环境数量。
                         new_ids = (dones > 0).nonzero(as_tuple=False)
                         rewbuffer.extend(cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
                         lenbuffer.extend(cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
@@ -393,9 +503,11 @@ class AmpOnPolicyRunner:
 
                 # compute returns
                 if self.training_type == "rl":
+                    # privileged_obs 是 rollout 末尾的 critic 观测，形状 (E, Oc)，用于 bootstrap V(s_T)。
                     self.alg.compute_returns(privileged_obs)
 
             # update policy
+            # update 会读取 storage 中 T*E 条转移，切成 mini-batch 更新 policy 和 discriminator。
             loss_dict = self.alg.update()
 
             stop = time.time()
@@ -425,7 +537,9 @@ class AmpOnPolicyRunner:
             self.save(os.path.join(self.log_dir, f"model_{self.current_learning_iteration}.pt"))
 
     def log(self, locs: dict, width: int = 80, pad: int = 35):
+        """写 TensorBoard/W&B/Neptune 日志，并在终端打印训练状态。"""
         # Compute the collection size
+        # collection_size: 本迭代实际采样的环境步数 = T * E * world_size。
         collection_size = self.num_steps_per_env * self.env.num_envs * self.gpu_world_size
         # Update total time-steps and time
         self.tot_timesteps += collection_size
@@ -436,6 +550,7 @@ class AmpOnPolicyRunner:
         ep_string = ""
         if locs["ep_infos"]:
             for key in locs["ep_infos"][0]:
+                # infotensor 收集最近完成 episode 的某个 info 字段，最后取均值写日志。
                 infotensor = torch.tensor([], device=self.device)
                 for ep_info in locs["ep_infos"]:
                     # handle scalar and zero dimensional tensor infos
@@ -532,6 +647,14 @@ class AmpOnPolicyRunner:
         print(log_string)
 
     def save(self, path: str, infos=None):
+        """保存 checkpoint。
+
+        主要内容：
+            - policy / optimizer
+            - AMP discriminator / AMP normalizer
+            - 可选 RND
+            - 可选 actor/critic 观测归一化器
+        """
         # -- Save model
         saved_dict = {
             "model_state_dict": self.alg.policy.state_dict(),
@@ -558,6 +681,15 @@ class AmpOnPolicyRunner:
             self.writer.save_model(path, self.current_learning_iteration)
 
     def load(self, path: str, load_optimizer: bool = True):
+        """加载 checkpoint。
+
+        Args:
+            path: checkpoint 文件路径。
+            load_optimizer: 若为 True 且 checkpoint 是恢复训练格式，则同时恢复 optimizer。
+
+        Returns:
+            checkpoint 中保存的 ``infos`` 字段。
+        """
         loaded_dict = torch.load(path, weights_only=False)
 
         # -- Load model (support both native and mjlab v5 checkpoint formats)
@@ -615,6 +747,15 @@ class AmpOnPolicyRunner:
         return loaded_dict["infos"]
 
     def get_inference_policy(self, device=None):
+        """返回部署/推理用策略函数。
+
+        返回函数输入可以是：
+            - 普通 actor 观测 ``x: (E, Oa)``；
+            - TensorDict 风格观测，函数会自动取 ``actor`` 或 ``policy`` key。
+
+        输出：
+            - 确定性动作均值，形状 ``(E, A)``。
+        """
         self.eval_mode()  # switch to evaluation mode (dropout for example)
         if device is not None:
             self.alg.policy.to(device)
@@ -642,6 +783,7 @@ class AmpOnPolicyRunner:
         return policy
 
     def train_mode(self):
+        """把参与训练的模块切到 train 模式。"""
         # -- PPO
         self.alg.policy.train()
         self.alg.discriminator.train()
@@ -654,6 +796,7 @@ class AmpOnPolicyRunner:
             self.privileged_obs_normalizer.train()
 
     def eval_mode(self):
+        """把参与推理/评估的模块切到 eval 模式。"""
         # -- PPO
         self.alg.policy.eval()
         self.alg.discriminator.eval()
@@ -666,6 +809,7 @@ class AmpOnPolicyRunner:
             self.privileged_obs_normalizer.eval()
 
     def add_git_repo_to_log(self, repo_file_path):
+        """把额外代码仓库加入日志快照列表，用于记录训练时的代码状态。"""
         self.git_status_repos.append(repo_file_path)
 
     """
@@ -673,7 +817,18 @@ class AmpOnPolicyRunner:
     """
 
     def _configure_multi_gpu(self):
-        """Configure multi-gpu training."""
+        """配置多 GPU 训练。
+
+        单卡/CPU 情况下：
+            - ``gpu_world_size = 1``
+            - ``gpu_local_rank = gpu_global_rank = 0``
+            - ``multi_gpu_cfg = None``
+
+        多卡情况下从环境变量读取：
+            - ``WORLD_SIZE``: 总进程数
+            - ``LOCAL_RANK``: 当前机器上的 GPU 序号
+            - ``RANK``: 全局进程序号
+        """
         # check if distributed training is enabled
         self.gpu_world_size = int(os.getenv("WORLD_SIZE", "1"))
         self.is_distributed = self.gpu_world_size > 1
